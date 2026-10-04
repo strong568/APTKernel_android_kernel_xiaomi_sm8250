@@ -8,7 +8,7 @@ set -e
 # ==========================================
 if [ -z "$1" ]; then
     echo "[!] Error: No device specified."
-    echo "Usage: $0 <device_name> [noneksu|rksu|ksuN|resukisu|sukisu-ultra|kowsu] [susfs|nonesusfs] [miui|aosp|both]"
+    echo "Usage: $0 <device_name> [noneksu|rksu|ksuN|resukisu|sukisu-ultra|kowsu|backslashxx-ksu] [susfs|nonesusfs] [miui|aosp|both]"
     exit 1
 fi
 
@@ -29,7 +29,7 @@ TARGET_OS="both"
 shift
 for arg in "$@"; do
     case "$arg" in
-        noneksu|rksu|ksuN|resukisu|sukisu-ultra|kowsu)
+        noneksu|rksu|ksuN|resukisu|sukisu-ultra|kowsu|backslashxx-ksu)
             KSU_VARIANT="$arg"
             ;;
         susfs|nonesusfs)
@@ -87,9 +87,9 @@ if [ "$KSU_VARIANT" != "noneksu" ]; then
             curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash
             ;;
         ksuN)
-            KSU_NAME="KernelSU-Next"
-            MGR_RECOMMEND="KernelSU-Next Manager (rifsxd)"
-            curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+            KSU_NAME="KernelSU-Next (dev)"
+            MGR_RECOMMEND="KernelSU-Next Manager (KernelSU-Next org)"
+            curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh" | bash -s dev
             ;;
         resukisu)
             KSU_NAME="ReSukiSU"
@@ -102,13 +102,17 @@ if [ "$KSU_VARIANT" != "noneksu" ]; then
             curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/main/kernel/setup.sh" | bash
             ;;
         kowsu)
-            KSU_NAME="KowSU"
+            KSU_NAME="KowSU (KOWX712)"
             MGR_RECOMMEND="KowSU / SukiSU Manager"
-            curl -LSs "https://raw.githubusercontent.com/kowx77/KowSU/main/kernel/setup.sh" | bash
+            curl -LSs "https://raw.githubusercontent.com/KOWX712/KernelSU/main/kernel/setup.sh" | bash
+            ;;
+        backslashxx-ksu)
+            KSU_NAME="backslashxx KernelSU"
+            MGR_RECOMMEND="KernelSU / SukiSU Manager (tương thích backslashxx)"
+            curl -LSs "https://raw.githubusercontent.com/backslashxx/KernelSU/master/kernel/setup.sh" | bash
             ;;
     esac
 
-    # Trích xuất phiên bản nếu có file ksu.h
     for ksu_hdr in KernelSU/kernel/ksu.h drivers/kernelsu/ksu.h; do
         if [ -f "$ksu_hdr" ]; then
             KSU_VER=$(grep -E '^#define[[:space:]]+KERNEL_SU_VERSION[[:space:]]+' "$ksu_hdr" | awk '{print $3}' | tr -d '"')
@@ -128,7 +132,7 @@ if [ "$SUSFS_VARIANT" == "susfs" ] && [ "$ENABLE_KSU" -eq 1 ]; then
     SUSFS_NAME="SuSFS (KSU_SUSFS Inline)"
 fi
 
-# Lưu lại thông tin tạo ghi chú phát hành
+# Lưu lại thông tin Release
 cat <<EOF > "${KERNEL_DIR}/release_info.env"
 DEVICE_NAME=${DEVICE_NAME}
 KSU_VARIANT=${KSU_VARIANT}
@@ -225,6 +229,132 @@ build_target() {
         sed -i 's/\/\/39 01 00 00 00 00 03 51 07 FF/39 01 00 00 00 00 03 51 07 FF/g' ${DTS_SOURCE}/dsi-panel-j2-42-02-0b-dsc-cmd.dtsi || true
         sed -i 's/\/\/39 01 00 00 00 00 03 51 07 FF/39 01 00 00 00 00 03 51 07 FF/g' ${DTS_SOURCE}/dsi-panel-j2-p1-42-02-0b-dsc-cmd.dtsi || true
         sed -i 's/\/\/39 01 00 00 00 00 03 51 0F FF/39 01 00 00 00 00 03 51 0F FF/g' ${DTS_SOURCE}/dsi-panel-j1u-42-02-0b-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 00 00 03 51 0F FF/39 01 00 00 00 00 03 51 0F FF/g' ${DTS_SOURCE}/dsi-panel-j2-42-02-0b-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 00 00 03 51 0F FF/39 01 00 00 00 00 03 51 0F FF/g' ${DTS_SOURCE}/dsi-panel-j2-p1-42-02-0b-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 00 00 05 51 07 FF 00 00/39 01 00 00 00 00 05 51 07 FF 00 00/g' ${DTS_SOURCE}/dsi-panel-j1s-42-02-0a-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 00 00 05 51 07 FF 00 00/39 01 00 00 00 00 05 51 07 FF 00 00/g' ${DTS_SOURCE}/dsi-panel-j1s-42-02-0a-mp-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 00 00 05 51 07 FF 00 00/39 01 00 00 00 00 05 51 07 FF 00 00/g' ${DTS_SOURCE}/dsi-panel-j2-mp-42-02-0b-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 00 00 05 51 07 FF 00 00/39 01 00 00 00 00 05 51 07 FF 00 00/g' ${DTS_SOURCE}/dsi-panel-j2-p2-1-42-02-0b-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 00 00 05 51 07 FF 00 00/39 01 00 00 00 00 05 51 07 FF 00 00/g' ${DTS_SOURCE}/dsi-panel-j2s-mp-42-02-0a-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 01 00 03 51 03 FF/39 01 00 00 01 00 03 51 03 FF/g' ${DTS_SOURCE}/dsi-panel-j11-38-08-0a-fhd-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 11 00 03 51 03 FF/39 01 00 00 11 00 03 51 03 FF/g' ${DTS_SOURCE}/dsi-panel-j2-p2-1-38-0c-0a-dsc-cmd.dtsi || true
+    fi
+
+    echo "[*] Making defconfig: ${DEFCONFIG}..."
+    make "${MAKE_OPTS[@]}" "${DEFCONFIG}"
+
+    # Inject Baseband-guard
+    scripts/config --file "${OUT_DIR}/.config" -e BBG
+
+    # Inject KernelSU & SuSFS
+    if [ "$ENABLE_KSU" -eq 1 ]; then
+        scripts/config --file "${OUT_DIR}/.config" -e KSU -e THREAD_INFO_IN_TASK
+        if [ "$ENABLE_SUSFS" -eq 1 ]; then
+            scripts/config --file "${OUT_DIR}/.config" -e KSU_SUSFS
+        else
+            scripts/config --file "${OUT_DIR}/.config" -d KSU_SUSFS
+        fi
+    else
+        scripts/config --file "${OUT_DIR}/.config" -d KSU -d KSU_SUSFS
+    fi
+
+    if [ "$OS_TYPE" == "miui" ]; then
+        scripts/config --file "${OUT_DIR}/.config" \
+            --set-str STATIC_USERMODEHELPER_PATH /system/bin/micd \
+            -e PERF_CRITICAL_RT_TASK \
+            -e SF_BINDER \
+            -e OVERLAY_FS \
+            -e MIGT \
+            -e MIGT_ENERGY_MODEL \
+            -e MIHW \
+            -e PACKAGE_RUNTIME_INFO \
+            -e BINDER_OPT \
+            -e KPERFEVENTS \
+            -e PERF_HUMANTASK \
+            -d LTO_CLANG \
+            -e LTO_NONE \
+            -d SHADOW_CALL_STACK \
+            -e XIAOMI_MIUI \
+            -d MI_MEMORY_SYSFS \
+            -e TASK_DELAY_ACCT \
+            -e MIUI_ZRAM_MEMORY_TRACKING \
+            -e PERF_HELPER \
+            -e BOOTUP_RECLAIM \
+            -e MI_RECLAIM \
+            -e RTMM \
+            -e MILLET_CGROUP \
+            -e MILLET_SIG \
+            -e MILLET_BINDER \
+            -e MILLET_PKG \
+            -e MILLET_BINDER_GKI \
+            -e MILLET_CORE \
+            -e MILLET_HS \
+            -e BINDER_PRIO \
+            -d REKERNEL \
+            -d REKERNEL_NETWORK
+    fi
+
+    if [ "$OS_TYPE" == "aosp" ]; then
+        scripts/config --file "${OUT_DIR}/.config" \
+            -e REKERNEL \
+            -e REKERNEL_NETWORK
+    fi
+
+    echo "[*] Updating config (make olddefconfig)..."
+    make "${MAKE_OPTS[@]}" olddefconfig
+
+    echo "[*] Building kernel..."
+    make "${MAKE_OPTS[@]}" 
+
+    if [ "$OS_TYPE" == "miui" ]; then
+        rm -rf "${DTS_SOURCE}"
+        mv "${DTS_BACKUP}" "${DTS_SOURCE}"
+    fi
+
+    if [ -f "${OUT_DIR}/arch/arm64/boot/Image" ]; then
+        echo "[+] $OS_TYPE Build Successful!"
+        rm -rf anykernel/kernels/*
+        mkdir -p "anykernel/kernels/${OS_TYPE}/"
+        
+        cp "${OUT_DIR}/arch/arm64/boot/Image" "anykernel/kernels/${OS_TYPE}/"
+        cp "${OUT_DIR}/arch/arm64/boot/dtb" "anykernel/kernels/${OS_TYPE}/"
+        
+        if [ -f "${OUT_DIR}/arch/arm64/boot/dtbo.img" ]; then
+            cp "${OUT_DIR}/arch/arm64/boot/dtbo.img" "anykernel/kernels/${OS_TYPE}/"
+        fi
+        
+        local GIT_COMMIT_ID=$(git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
+        local OS_UPPER=$(echo "$OS_TYPE" | tr '[:lower:]' '[:upper:]')
+        
+        local ZIP_FILENAME="APTKernel_${OS_UPPER}_${DEVICE_NAME}_${KSU_VARIANT}_${SUSFS_VARIANT}_$(date +'%Y%m%d_%H%M%S')_anykernel3_${GIT_COMMIT_ID}.zip"
+        
+        echo "[*] Zipping $ZIP_FILENAME ..."
+        pushd anykernel > /dev/null
+        zip -r9 "$ZIP_FILENAME" ./* -x .git .gitignore out/ ./*.zip > /dev/null
+        mv "$ZIP_FILENAME" ../
+        popd > /dev/null
+        
+        echo "[+] Packed into: $ZIP_FILENAME"
+    else
+        echo "[-] $OS_TYPE Build Failed."
+        exit 1
+    fi
+}
+
+# ==========================================
+# Target Selection
+# ==========================================
+if [ "$TARGET_OS" == "aosp" ] || [ "$TARGET_OS" == "both" ]; then
+    build_target "aosp"
+fi
+
+if [ "$TARGET_OS" == "miui" ] || [ "$TARGET_OS" == "both" ]; then
+    build_target "miui"
+fi
+
+echo "==========================================="
+echo "[+] Completed: ${KSU_VARIANT} | ${SUSFS_VARIANT}"
+F FF/g' ${DTS_SOURCE}/dsi-panel-j1u-42-02-0b-dsc-cmd.dtsi || true
         sed -i 's/\/\/39 01 00 00 00 00 03 51 0F FF/39 01 00 00 00 00 03 51 0F FF/g' ${DTS_SOURCE}/dsi-panel-j2-42-02-0b-dsc-cmd.dtsi || true
         sed -i 's/\/\/39 01 00 00 00 00 03 51 0F FF/39 01 00 00 00 00 03 51 0F FF/g' ${DTS_SOURCE}/dsi-panel-j2-p1-42-02-0b-dsc-cmd.dtsi || true
         sed -i 's/\/\/39 01 00 00 00 00 05 51 07 FF 00 00/39 01 00 00 00 00 05 51 07 FF 00 00/g' ${DTS_SOURCE}/dsi-panel-j1s-42-02-0a-dsc-cmd.dtsi || true
