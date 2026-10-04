@@ -70,19 +70,29 @@ jobs:
         wget -q https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz
         tar -zxvf Clang-16.0.6-20260807.tar.gz
 
-    - name: Setup ReSukiSU & Detect Source Date
+    - name: Setup ReSukiSU & Patch for 4.19 Non-GKI
       id: ksu_info
       run: |
         echo "Setting up ReSukiSU..."
         curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
-        # Dò ngày commit của ReSukiSU
-        if [ -d "KernelSU" ]; then
-          KSU_DATE=$(git -C KernelSU log -1 --format="%Y.%m.%d")
-          KSU_COMMIT=$(git -C KernelSU rev-parse --short HEAD)
-        elif [ -d "drivers/kernelsu" ]; then
-          KSU_DATE=$(git -C drivers/kernelsu log -1 --format="%Y.%m.%d")
-          KSU_COMMIT=$(git -C drivers/kernelsu rev-parse --short HEAD)
+        # Dò thư mục cài đặt KernelSU / ReSukiSU
+        KSU_DIR=""
+        if [ -d "drivers/kernelsu" ]; then
+          KSU_DIR="drivers/kernelsu"
+        elif [ -d "KernelSU" ]; then
+          KSU_DIR="KernelSU"
+        fi
+
+        # Vá lỗi Non-GKI TP hook trên kernel 4.19
+        if [ -n "$KSU_DIR" ]; then
+          echo "Found ReSukiSU in $KSU_DIR. Patching Kbuild for Non-GKI 4.19..."
+          sed -i '/TP hooks are incompatible with Non-GKI\/GKI 1.0 kernels/s/^/#/' "$KSU_DIR/Kbuild"
+          sed -i 's/\$(error TP hooks are incompatible with Non-GKI\/GKI 1.0 kernels..)/# \$(error TP hooks are incompatible)/g' "$KSU_DIR/Kbuild"
+          sed -i 's/ccflags-y += -DKSU_TP_HOOK/ccflags-y += -DKSU_KPROBES_HOOK/g' "$KSU_DIR/Kbuild" 2>/dev/null || true
+
+          KSU_DATE=$(git -C "$KSU_DIR" log -1 --format="%Y.%m.%d" 2>/dev/null || date +"%Y.%m.%d")
+          KSU_COMMIT=$(git -C "$KSU_DIR" rev-parse --short HEAD 2>/dev/null || echo "latest")
         else
           KSU_DATE=$(date +"%Y.%m.%d")
           KSU_COMMIT="latest"
@@ -108,26 +118,24 @@ jobs:
     - name: Detect SuSFS Version & Prepare Release
       id: prep
       run: |
-        # 1. Tự động dò tìm phiên bản SuSFS
         DETECTED_SUSFS=""
         
-        # Cách A: Dò macro SUSFS_VERSION trong tệp header
+        # Quét phiên bản trong file header susfs.h
         SUSFS_HEADER=$(find . -maxdepth 4 -type f -name "susfs.h" 2>/dev/null | head -n 1)
         if [ -n "$SUSFS_HEADER" ]; then
           DETECTED_SUSFS=$(grep -E 'SUSFS_VERSION' "$SUSFS_HEADER" | head -n 1 | awk -F'"' '{print $2}')
         fi
 
-        # Cách B: Nếu không có header, quét trực tiếp binary image bằng chuỗi strings
+        # Quét dự phòng trực tiếp trong binary kernel Image
         if [ -z "$DETECTED_SUSFS" ]; then
-          IMAGE_FILE=$(find out/ arch/ -type f \( -name "Image" -o -name "Image.gz" \) 2>/dev/null | head -n 1)
+          IMAGE_FILE=$(find out/ out_aosp/ out_miui/ arch/ -type f \( -name "Image" -o -name "Image.gz" \) 2>/dev/null | head -n 1)
           if [ -n "$IMAGE_FILE" ]; then
-            DETECTED_SUSFS=$(strings "$IMAGE_FILE" | grep -ioE 'susfs[-_ ]?v?[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 | sed 's/ //g')
+            DETECTED_SUSFS=$(strings "$IMAGE_FILE" | grep -ioE 'susfs[-_ ]?v?[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "")
           fi
         fi
 
-        # Gán nhãn cho tên file
         if [ -n "$DETECTED_SUSFS" ]; then
-          [[ "$DETECTED_SUSFS" =~ ^[0-9] ]] && DETECTED_SUSFS="v$DETECTED_SUSFS"
+          [[ ! "$DETECTED_SUSFS" =~ ^v ]] && DETECTED_SUSFS="v$DETECTED_SUSFS"
           SUSFS_NAME_TAG="SuSFS_${DETECTED_SUSFS}"
           SUSFS_STATUS="Có (${DETECTED_SUSFS})"
         else
@@ -137,7 +145,6 @@ jobs:
 
         echo "Phát hiện SuSFS: $SUSFS_STATUS"
 
-        # 2. Xử lý tên file và gom artifact
         KSU_DATE="${{ steps.ksu_info.outputs.ksu_date }}"
         KSU_COMMIT="${{ steps.ksu_info.outputs.ksu_commit }}"
         BUILD_TIME=$(date +"%Y%m%d_%H%M")
@@ -151,7 +158,6 @@ jobs:
           fi
         done
 
-        # 3. Tạo mô tả Release chi tiết
         cat <<EOF > release_notes.md
         ## 🚀 APTKernel - ${{ github.event.inputs.device }}
 
@@ -174,7 +180,7 @@ jobs:
         ### 📲 Khuyên dùng phiên bản Manager:
         - **Manager khuyến nghị:** **ReSukiSU / SukiSU Manager (Bản phát hành ngày ${KSU_DATE} hoặc mới hơn gần nhất)**
         - **Tải Manager chính thức:** [ReSukiSU Releases trên GitHub](https://github.com/ReSukiSU/ReSukiSU/releases)
-        *(Vui lòng dùng đúng Manager tương ứng với ngày build của Kernel để giao diện app đồng bộ hoàn toàn với ksu driver).*
+        *(Vui lòng dùng đúng Manager tương ứng với ngày build ${KSU_DATE} của Kernel để tránh lỗi không nhận quyền root).*
         EOF
 
         echo "tag_name=${{ github.event.inputs.device }}-ReSukiSU-${KSU_DATE}-${BUILD_TIME}" >> $GITHUB_OUTPUT
