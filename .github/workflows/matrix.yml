@@ -46,6 +46,11 @@ jobs:
         exclude:
           - ksu: noneksu
             susfs: susfs
+          - ksu: resukisu
+            susfs: nonesusfs
+          - ksu: sukisu-ultra
+            susfs: nonesusfs
+
 
     steps:
     - name: Checkout Repository
