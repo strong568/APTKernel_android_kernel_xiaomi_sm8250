@@ -1,4 +1,4 @@
-name: Build Kernel matrix ksu
+name: Build munch Kernel matrix
 
 on:
   workflow_dispatch:
@@ -34,17 +34,18 @@ on:
 
 jobs:
   build-kernel:
-    name: Build ${{ github.event.inputs.device }} | KSU:${{ matrix.ksu_variant }} | OS:${{ github.event.inputs.target_os }}
+    name: Build ${{ github.event.inputs.device }} \vert{}${{ matrix.ksu }} | ${{ matrix.susfs }} \vert{} OS:${{ github.event.inputs.target_os }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
-        ksu_variant:
-          - none
-          - ksun
-          - resukisu
-          - sukisu_ultra
-          - kowsu
+        ksu: [noneksu, rksu, ksuN, resukisu, sukisu-ultra, kowsu, backslashxx-ksu]
+        susfs: [susfs, nonesusfs]
+        exclude:
+          - ksu: noneksu
+            susfs: susfs
 
     steps:
     - name: Checkout Repository
@@ -56,19 +57,18 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential ccache curl flex gawk \
-          git gnupg gperf libncurses-dev lib32readline-dev lib32z1-dev \
-          liblz4-tool libssl-dev libxml2 libxml2-utils lzop pngcrush rsync \
+          git gnupg gperf imagemagick libncurses-dev \
+          lib32readline-dev lib32z1-dev liblz4-tool \
+          libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync \
           schedtool squashfs-tools xsltproc zip zlib1g-dev python3
 
     - name: Cache ccache
       uses: actions/cache@v4
       with:
         path: ~/.cache/ccache_mikernel
-        key: ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-${{ matrix.ksu_variant }}-${{ github.run_id }}
+        key: ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-${{ matrix.ksu }}-${{ matrix.susfs }}-${{ github.run_id }}
         restore-keys: |
-          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-${{ matrix.ksu_variant }}-
-          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-
-          ${{ runner.os }}-kernel-ccache-
+          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-${{ matrix.ksu }}-${{ matrix.susfs }}-${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-${{ runner.os }}-kernel-ccache-
 
     - name: Setup zyc-clang 16 Toolchain
       run: |
@@ -80,12 +80,50 @@ jobs:
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
-        ./build_kernel.sh "${{ github.event.inputs.device }}" "${{ matrix.ksu_variant }}" "${{ github.event.inputs.target_os }}"
+        echo "Executing: ./build_kernel.sh ${{ github.event.inputs.device }}${{ matrix.ksu }} ${{ matrix.susfs }}${{ github.event.inputs.target_os }}"
+        ./build_kernel.sh "${{ github.event.inputs.device }}" "${{ matrix.ksu }}" "${{ matrix.susfs }}" "${{ github.event.inputs.target_os }}"
 
-    - name: Upload Flashable ZIP
+    - name: Generate Release Notes
+      id: gen_notes
+      run: |
+        if [ -f release_info.env ]; then
+          source release_info.env
+        fi
+
+        ZIP_LIST=$(ls APTKernel_*.zip 2>/dev/null | tr '\n' ' ' || echo "Không tìm thấy tệp")
+        TAG_NAME="release-${{ github.event.inputs.device }}-${{ github.run_id }}"
+        echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+
+        cat <<EOF > release_body.md
+        ## 🚀 APTKernel Release - ${{ github.event.inputs.device }}
+
+        ### 📦 Thông tin tệp ZIP:
+        - **Tên tệp:** \`${ZIP_LIST}\`
+        - **Mục tiêu ROM:** ${{ github.event.inputs.target_os }}
+
+        ### 🛡️ Trạng thái KernelSU & SuSFS:
+        | Thành phần | Có / Không | Tên cụ thể | Phiên bản / Manager khuyến nghị |
+        | :--- | :--- | :--- | :--- |
+        | **KernelSU** | ${KSU_STATUS:-Không} | ${KSU_NAME:-None} (${{ matrix.ksu }}) | **Kernel:** ${KSU_TAG:-None} <br> **Manager:**${MGR_RECOMMEND} |
+        | **SuSFS** | ${SUSFS_STATUS:-Không} | ${SUSFS_NAME:-None} (${{ matrix.susfs }}) | Cấu hình cờ KSU_SUSFS |
+
+        ---
+        *Bản dựng tự động từ GitHub Actions cho thiết bị: ${{ github.event.inputs.device }}*
+        EOF
+
+    - name: Publish to GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.gen_notes.outputs.tag_name }}
+        name: "APTKernel [${{ github.event.inputs.device }}] \vert{}${{ matrix.ksu }} | ${{ matrix.susfs }} \vert{} OS:${{ github.event.inputs.target_os }}"
+        body_path: release_body.md
+        files: APTKernel_*.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload Flashable ZIP Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: APTKernel-${{ github.event.inputs.device }}-${{ matrix.ksu_variant }}-${{ github.event.inputs.target_os }}-${{ github.run_id }}
+        name: APTKernel-${{ github.event.inputs.device }}-${{ matrix.ksu }}-${{ matrix.susfs }}-${{ github.event.inputs.target_os }}-${{ github.run_id }}
         path: APTKernel_*.zip
         compression-level: 0
-        
