@@ -31,15 +31,19 @@ on:
           - aosp
           - miui
           - both
+      susfs_version:
+        description: 'Phiên bản SuSFS đi kèm'
+        required: true
+        default: 'v1.5.5'
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
   build-kernel:
-    name: Build ${{ github.event.inputs.device }} | KSU:${{ matrix.ksu }} | OS:${{ github.event.inputs.target_os }}
+    name: Build ${{ github.event.inputs.device }} \vert{} ReSukiSU \vert{} SuSFS${{ github.event.inputs.susfs_version }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        ksu: [true, false]
 
     steps:
     - name: Checkout Repository
@@ -54,17 +58,15 @@ jobs:
           git gnupg gperf imagemagick libncurses-dev \
           lib32readline-dev lib32z1-dev liblz4-tool \
           libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync \
-          schedtool squashfs-tools xsltproc zip zlib1g-dev python3
+          schedtool squashfs-tools xsltproc zip zlib1g-dev python3 jq
 
     - name: Cache ccache
       uses: actions/cache@v4
       with:
         path: ~/.cache/ccache_mikernel
-        key: ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-ksu-${{ matrix.ksu }}-${{ github.run_id }}
+        key: ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-resukisu-${{ github.run_id }}
         restore-keys: |
-          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-ksu-${{ matrix.ksu }}-
-          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-
-          ${{ runner.os }}-kernel-ccache-
+          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-resukisu-${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-${{ runner.os }}-kernel-ccache-
 
     - name: Setup zyc-clang 16 Toolchain
       run: |
@@ -73,27 +75,102 @@ jobs:
         wget -q https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz
         tar -zxvf Clang-16.0.6-20260807.tar.gz
 
+    - name: Setup ReSukiSU & Detect Version
+      id: ksu_info
+      run: |
+        echo "Setting up ReSukiSU..."
+        curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+
+        # Lấy ngày commit mới nhất của mã nguồn ReSukiSU làm mốc phiên bản
+        if [ -d "KernelSU" ]; then
+          KSU_DATE=$(git -C KernelSU log -1 --format="%Y.%m.%d")
+          KSU_COMMIT=$(git -C KernelSU rev-parse --short HEAD)
+        elif [ -d "drivers/kernelsu" ]; then
+          KSU_DATE=$(git -C drivers/kernelsu log -1 --format="%Y.%m.%d")
+          KSU_COMMIT=$(git -C drivers/kernelsu rev-parse --short HEAD)
+        else
+          KSU_DATE=$(date +"%Y.%m.%d")
+          KSU_COMMIT="latest"
+        fi
+
+        echo "ksu_date=$KSU_DATE" >> $GITHUB_OUTPUT
+        echo "ksu_commit=$KSU_COMMIT" >> $GITHUB_OUTPUT
+        echo "Detected ReSukiSU Version/Date: $KSU_DATE ($KSU_COMMIT)"
+
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
 
-        ARGS="${{ github.event.inputs.device }}"
-
-        if [ "${{ matrix.ksu }}" == "true" ]; then
-          ARGS="$ARGS ksu"
-        fi
+        ARGS="${{ github.event.inputs.device }} resukisu susfs-${{ github.event.inputs.susfs_version }}"
 
         if [ "${{ github.event.inputs.target_os }}" != "both" ]; then
-          ARGS="$ARGS ${{ github.event.inputs.target_os }}"
+          ARGS="$ARGS${{ github.event.inputs.target_os }}"
         fi
 
         echo "Executing command: ./build_kernel.sh $ARGS"
         ./build_kernel.sh $ARGS
 
-    - name: Upload Flashable ZIP
+    - name: Prepare Artifacts & Release Notes
+      id: prep
+      run: |
+        SUSFS_VER="${{ github.event.inputs.susfs_version }}"
+        KSU_DATE="${{ steps.ksu_info.outputs.ksu_date }}"
+        KSU_COMMIT="${{ steps.ksu_info.outputs.ksu_commit }}"
+        BUILD_TIME=$(date +"%Y%m%d_%H%M")
+
+        mkdir -p dist
+
+        # Tên file zip gắn rõ: Thiết bị - ReSukiSU [Ngày Source KSU] - SuSFS [Phiên bản]
+        # Ví dụ: APTKernel-munch-ReSukiSU_2026.09.28-SuSFS_v1.5.5-both.zip
+        for f in APTKernel_*.zip; do
+          if [ -f "$f" ]; then
+            NEW_NAME="APTKernel-${{ github.event.inputs.device }}-ReSukiSU_${KSU_DATE}-SuSFS_${SUSFS_VER}-${{ github.event.inputs.target_os }}.zip"
+            cp "$f" "dist/$NEW_NAME"
+            echo "Đã đóng gói: dist/$NEW_NAME"
+          fi
+        done
+
+        cat <<EOF > release_notes.md
+        ## 🚀 APTKernel - ${{ github.event.inputs.device }}
+
+        ### 📋 Thông tin bản build:
+        - **Thiết bị:** \`${{ github.event.inputs.device }}\`
+        - **Hệ điều hành:** \`${{ github.event.inputs.target_os }}\`
+        - **Bản ReSukiSU (Source date):** \`${KSU_DATE}\` (\`${KSU_COMMIT}\`)
+        - **Hỗ trợ SuSFS:** \`Có (${SUSFS_VER})\`
+        - **Thời gian build:** \`$(date -u +"%Y-%m-%d %H:%M:%S UTC")\`
+
+        ---
+
+        ### 🛡️ Chú thích về SuSFS:
+        - Nhân đã được vá sẵn **SuSFS (${SUSFS_VER})** cấp Kernel.
+        - Tác dụng: Ẩn thư mục mount, bypass phát hiện root từ Play Integrity, ngân hàng và game.
+        - Cần cài thêm **SuSFS Module** để cấu hình tính năng ẩn hoàn chỉnh.
+
+        ---
+
+        ### 📲 Khuyên dùng phiên bản Manager:
+        - **Manager khuyến nghị:** **ReSukiSU / SukiSU Manager (Bản phát hành ngày ${KSU_DATE} hoặc bản mới hơn gần nhất)**
+        - **Lưu ý quan trọng:** ReSukiSU yêu cầu Manager phải tương thích giao tiếp với ngày cập nhật của Kernel (\`${KSU_DATE}\`). Không sử dụng Official KSU Manager tránh lỗi không nhận quyền root.
+        - **Link tải:** [Tải ReSukiSU Manager tại GitHub Releases](https://github.com/ReSukiSU/ReSukiSU/releases)
+        EOF
+
+        echo "tag_name=${{ github.event.inputs.device }}-ReSukiSU-${KSU_DATE}-${BUILD_TIME}" >> $GITHUB_OUTPUT
+        echo "release_title=APTKernel ${{ github.event.inputs.device }} [ReSukiSU${KSU_DATE}][SuSFS ${SUSFS_VER}]" >> $GITHUB_OUTPUT
+
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: APTKernel-${{ github.event.inputs.device }}-KSU-${{ matrix.ksu }}-${{ github.event.inputs.target_os }}-${{ github.run_id }}
-        path: APTKernel_*.zip
-        compression-level: 0 # Already compressed as ZIP, skip re-compression
-        
+        name: APTKernel-${{ github.event.inputs.device }}-ReSukiSU-${{ steps.ksu_info.outputs.ksu_date }}
+        path: dist/*.zip
+        compression-level: 0
+
+    - name: Publish to GitHub Releases
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.prep.outputs.tag_name }}
+        name: ${{ steps.prep.outputs.release_title }}
+        body_path: release_notes.md
+        files: dist/*.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
