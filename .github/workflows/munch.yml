@@ -73,10 +73,27 @@ jobs:
     - name: Setup ReSukiSU & Patch for 4.19 Non-GKI
       id: ksu_info
       run: |
+        # 1. Bật Kprobes trước trong defconfig để ReSukiSU nhận diện chế độ Kprobes
+        DEFCONFIG_PATH="arch/arm64/configs/${{ github.event.inputs.device }}_defconfig"
+        if [ -f "$DEFCONFIG_PATH" ]; then
+          echo ">>> Injecting Kprobes into $DEFCONFIG_PATH..."
+          sed -i '/CONFIG_KSU_TP_HOOK/d' "$DEFCONFIG_PATH"
+          cat << 'EOF' >> "$DEFCONFIG_PATH"
+        CONFIG_KPROBES=y
+        CONFIG_HAVE_KPROBES=y
+        CONFIG_KPROBE_EVENTS=y
+        CONFIG_MODULES=y
+        CONFIG_KALLSYMS=y
+        CONFIG_KALLSYMS_ALL=y
+        CONFIG_KSU_KPROBES_HOOK=y
+        # CONFIG_KSU_TP_HOOK is not set
+        EOF
+        fi
+
         echo "Setting up ReSukiSU..."
         curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
-        # Dò thư mục cài đặt KernelSU / ReSukiSU
+        # 2. Dò thư mục KernelSU
         KSU_DIR=""
         if [ -d "drivers/kernelsu" ]; then
           KSU_DIR="drivers/kernelsu"
@@ -84,12 +101,18 @@ jobs:
           KSU_DIR="KernelSU"
         fi
 
-        # Vá lỗi Non-GKI TP hook trên kernel 4.19
+        # 3. Vô hiệu hóa cảnh báo Non-GKI TP hook và ép Kprobes hook trong Kbuild
         if [ -n "$KSU_DIR" ]; then
-          echo "Found ReSukiSU in $KSU_DIR. Patching Kbuild for Non-GKI 4.19..."
-          sed -i '/TP hooks are incompatible with Non-GKI\/GKI 1.0 kernels/s/^/#/' "$KSU_DIR/Kbuild"
-          sed -i 's/\$(error TP hooks are incompatible with Non-GKI\/GKI 1.0 kernels..)/# \$(error TP hooks are incompatible)/g' "$KSU_DIR/Kbuild"
-          sed -i 's/ccflags-y += -DKSU_TP_HOOK/ccflags-y += -DKSU_KPROBES_HOOK/g' "$KSU_DIR/Kbuild" 2>/dev/null || true
+          echo "Found ReSukiSU in $KSU_DIR. Patching Kbuild and Makefile..."
+          
+          # Comment out dòng thông báo lỗi $(error TP hooks are...)
+          sed -i 's/$(error TP hooks are incompatible/# $(error TP hooks are incompatible/g' "$KSU_DIR/Kbuild" 2>/dev/null || true
+          sed -i 's/$(error TP hooks are only supported/# $(error TP hooks are only supported/g' "$KSU_DIR/Kbuild" 2>/dev/null || true
+          sed -i '/TP hooks are incompatible with Non-GKI/s/^/#/' "$KSU_DIR/Kbuild" 2>/dev/null || true
+          
+          # Ép cờ KPROBES hook thay vì TP hook
+          sed -i 's/-DKSU_TP_HOOK/-DKSU_KPROBES_HOOK/g' "$KSU_DIR/Kbuild" 2>/dev/null || true
+          sed -i 's/CONFIG_KSU_TP_HOOK/CONFIG_KSU_KPROBES_HOOK/g' "$KSU_DIR/Kbuild" 2>/dev/null || true
 
           KSU_DATE=$(git -C "$KSU_DIR" log -1 --format="%Y.%m.%d" 2>/dev/null || date +"%Y.%m.%d")
           KSU_COMMIT=$(git -C "$KSU_DIR" rev-parse --short HEAD 2>/dev/null || echo "latest")
@@ -101,6 +124,7 @@ jobs:
         echo "ksu_date=$KSU_DATE" >> $GITHUB_OUTPUT
         echo "ksu_commit=$KSU_COMMIT" >> $GITHUB_OUTPUT
         echo "ReSukiSU Commit Date: $KSU_DATE ($KSU_COMMIT)"
+
 
     - name: Run Build Script
       run: |
