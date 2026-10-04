@@ -31,18 +31,13 @@ on:
           - aosp
           - miui
           - both
-      susfs_version:
-        description: 'Phiên bản SuSFS đi kèm'
-        required: true
-        default: 'v1.5.5'
-        type: string
 
 permissions:
   contents: write
 
 jobs:
   build-kernel:
-    name: Build ${{ github.event.inputs.device }} \vert{} ReSukiSU \vert{} SuSFS${{ github.event.inputs.susfs_version }}
+    name: Build ${{ github.event.inputs.device }} | ReSukiSU + Auto-detect SuSFS
     runs-on: ubuntu-latest
 
     steps:
@@ -58,7 +53,7 @@ jobs:
           git gnupg gperf imagemagick libncurses-dev \
           lib32readline-dev lib32z1-dev liblz4-tool \
           libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync \
-          schedtool squashfs-tools xsltproc zip zlib1g-dev python3 jq
+          schedtool squashfs-tools xsltproc zip zlib1g-dev python3 jq strings
 
     - name: Cache ccache
       uses: actions/cache@v4
@@ -75,13 +70,13 @@ jobs:
         wget -q https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz
         tar -zxvf Clang-16.0.6-20260807.tar.gz
 
-    - name: Setup ReSukiSU & Detect Version
+    - name: Setup ReSukiSU & Detect Source Date
       id: ksu_info
       run: |
         echo "Setting up ReSukiSU..."
         curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
-        # Lấy ngày commit mới nhất của mã nguồn ReSukiSU làm mốc phiên bản
+        # Dò ngày commit của ReSukiSU
         if [ -d "KernelSU" ]; then
           KSU_DATE=$(git -C KernelSU log -1 --format="%Y.%m.%d")
           KSU_COMMIT=$(git -C KernelSU rev-parse --short HEAD)
@@ -95,13 +90,13 @@ jobs:
 
         echo "ksu_date=$KSU_DATE" >> $GITHUB_OUTPUT
         echo "ksu_commit=$KSU_COMMIT" >> $GITHUB_OUTPUT
-        echo "Detected ReSukiSU Version/Date: $KSU_DATE ($KSU_COMMIT)"
+        echo "ReSukiSU Commit Date: $KSU_DATE ($KSU_COMMIT)"
 
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
 
-        ARGS="${{ github.event.inputs.device }} resukisu susfs-${{ github.event.inputs.susfs_version }}"
+        ARGS="${{ github.event.inputs.device }} resukisu"
 
         if [ "${{ github.event.inputs.target_os }}" != "both" ]; then
           ARGS="$ARGS${{ github.event.inputs.target_os }}"
@@ -110,53 +105,83 @@ jobs:
         echo "Executing command: ./build_kernel.sh $ARGS"
         ./build_kernel.sh $ARGS
 
-    - name: Prepare Artifacts & Release Notes
+    - name: Detect SuSFS Version & Prepare Release
       id: prep
       run: |
-        SUSFS_VER="${{ github.event.inputs.susfs_version }}"
+        # 1. Tự động dò tìm phiên bản SuSFS trong mã nguồn kernel
+        DETECTED_SUSFS=""
+        
+        # Dò trong file header susfs.h (nơi định nghĩa SUSFS_VERSION thường gặp)
+        SUSFS_HEADER=$(find . -maxdepth 4 -type f -name "susfs.h" 2>/dev/null | head -n 1)
+        if [ -n "$SUSFS_HEADER" ]; then
+          DETECTED_SUSFS=$(grep -E 'SUSFS_VERSION' "$SUSFS_HEADER" | head -n 1 | awk -F'"' '{print $2}')
+        fi
+
+        # Nếu chưa tìm thấy, dò trực tiếp chuỗi ký tự susfs_v hoặc v1.x trong kernel image build xong
+        if [ -z "$DETECTED_SUSFS" ]; then
+          IMAGE_FILE=$(find out/ arch/ -type f \( -name "Image" -o -name "Image.gz" \) 2>/dev/null | head -n 1)
+          if [ -n "$IMAGE_FILE" ]; then
+            DETECTED_SUSFS=$(strings "$IMAGE_FILE" | grep -ioE 'susfs[-_ ]?v?[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 | sed 's/ //g')
+          fi
+        fi
+
+        # Gán nhãn cho tên file
+        if [ -n "$DETECTED_SUSFS" ]; then
+          # Chuẩn hoá nếu thiếu tiền tố 'v'
+          [[ "$DETECTED_SUSFS" =~ ^[0-9] ]] && DETECTED_SUSFS="v$DETECTED_SUSFS"
+          SUSFS_NAME_TAG="SuSFS_${DETECTED_SUSFS}"
+          SUSFS_STATUS="Có (${DETECTED_SUSFS})"
+        else
+          SUSFS_NAME_TAG="NoSuSFS"
+          SUSFS_STATUS="Không tìm thấy chữ ký SuSFS"
+        fi
+
+        echo "Phát hiện SuSFS: $SUSFS_STATUS"
+
+        # 2. Xử lý tên file và gom artifact
         KSU_DATE="${{ steps.ksu_info.outputs.ksu_date }}"
         KSU_COMMIT="${{ steps.ksu_info.outputs.ksu_commit }}"
         BUILD_TIME=$(date +"%Y%m%d_%H%M")
-
         mkdir -p dist
 
-        # Tên file zip gắn rõ: Thiết bị - ReSukiSU [Ngày Source KSU] - SuSFS [Phiên bản]
-        # Ví dụ: APTKernel-munch-ReSukiSU_2026.09.28-SuSFS_v1.5.5-both.zip
+        # Đổi tên file zip build ra
+        # Cấu trúc: APTKernel-[Device]-ReSukiSU_[KSU_DATE]-[SuSFS_Tag]-[Target_OS].zip
         for f in APTKernel_*.zip; do
           if [ -f "$f" ]; then
-            NEW_NAME="APTKernel-${{ github.event.inputs.device }}-ReSukiSU_${KSU_DATE}-SuSFS_${SUSFS_VER}-${{ github.event.inputs.target_os }}.zip"
+            NEW_NAME="APTKernel-${{ github.event.inputs.device }}-ReSukiSU_${KSU_DATE}-${SUSFS_NAME_TAG}-${{ github.event.inputs.target_os }}.zip"
             cp "$f" "dist/$NEW_NAME"
-            echo "Đã đóng gói: dist/$NEW_NAME"
+            echo "Đã tạo gói: dist/$NEW_NAME"
           fi
         done
 
+        # 3. Tạo mô tả Release chi tiết
         cat <<EOF > release_notes.md
         ## 🚀 APTKernel - ${{ github.event.inputs.device }}
 
-        ### 📋 Thông tin bản build:
+        ### 📋 Thông tin phiên bản:
         - **Thiết bị:** \`${{ github.event.inputs.device }}\`
         - **Hệ điều hành:** \`${{ github.event.inputs.target_os }}\`
-        - **Bản ReSukiSU (Source date):** \`${KSU_DATE}\` (\`${KSU_COMMIT}\`)
-        - **Hỗ trợ SuSFS:** \`Có (${SUSFS_VER})\`
+        - **Bản ReSukiSU:** \`${KSU_DATE}\` (Commit: \`${KSU_COMMIT}\`)
+        - **SuSFS (Tự nhận diện):** \`${SUSFS_STATUS}\`
         - **Thời gian build:** \`$(date -u +"%Y-%m-%d %H:%M:%S UTC")\`
 
         ---
 
         ### 🛡️ Chú thích về SuSFS:
-        - Nhân đã được vá sẵn **SuSFS (${SUSFS_VER})** cấp Kernel.
-        - Tác dụng: Ẩn thư mục mount, bypass phát hiện root từ Play Integrity, ngân hàng và game.
-        - Cần cài thêm **SuSFS Module** để cấu hình tính năng ẩn hoàn chỉnh.
+        - Bản build đã tích hợp sẵn patch **SuSFS (${DETECTED_SUSFS:-Tự động})** ở cấp Kernel.
+        - Tác dụng: Hỗ trợ ẩn mount point, giấu trạng thái root/bootloader khỏi các cơ chế kiểm tra (Play Integrity MEETS_STRONG, App Ngân hàng, Game).
+        - **Cần cài đặt thêm SuSFS Module** tương thích với phiên bản SuSFS trên để cấu hình tệp tin/mount ẩn.
 
         ---
 
         ### 📲 Khuyên dùng phiên bản Manager:
-        - **Manager khuyến nghị:** **ReSukiSU / SukiSU Manager (Bản phát hành ngày ${KSU_DATE} hoặc bản mới hơn gần nhất)**
-        - **Lưu ý quan trọng:** ReSukiSU yêu cầu Manager phải tương thích giao tiếp với ngày cập nhật của Kernel (\`${KSU_DATE}\`). Không sử dụng Official KSU Manager tránh lỗi không nhận quyền root.
-        - **Link tải:** [Tải ReSukiSU Manager tại GitHub Releases](https://github.com/ReSukiSU/ReSukiSU/releases)
+        - **Manager khuyến nghị:** **ReSukiSU / SukiSU Manager (Bản phát hành ngày ${KSU_DATE} hoặc mới hơn gần nhất)**
+        - **Tải Manager chính thức:** [ReSukiSU Releases trên GitHub](https://github.com/ReSukiSU/ReSukiSU/releases)
+        *(Vui lòng dùng đúng Manager tương ứng với ngày build của Kernel để giao diện app đồng bộ hoàn toàn với ksu driver).*
         EOF
 
         echo "tag_name=${{ github.event.inputs.device }}-ReSukiSU-${KSU_DATE}-${BUILD_TIME}" >> $GITHUB_OUTPUT
-        echo "release_title=APTKernel ${{ github.event.inputs.device }} [ReSukiSU${KSU_DATE}][SuSFS ${SUSFS_VER}]" >> $GITHUB_OUTPUT
+        echo "release_title=APTKernel ${{ github.event.inputs.device }} [ReSukiSU${KSU_DATE}][${SUSFS_NAME_TAG}]" >> $GITHUB_OUTPUT
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
