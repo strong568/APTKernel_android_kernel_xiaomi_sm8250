@@ -49,11 +49,11 @@ jobs:
     - name: Set up Environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex gawk \
+        sudo apt-get install -y bc bison build-essential binutils ccache curl flex gawk \
           git gnupg gperf imagemagick libncurses-dev \
           lib32readline-dev lib32z1-dev liblz4-tool \
           libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync \
-          schedtool squashfs-tools xsltproc zip zlib1g-dev python3 jq strings
+          schedtool squashfs-tools xsltproc zip zlib1g-dev python3 jq
 
     - name: Cache ccache
       uses: actions/cache@v4
@@ -108,16 +108,16 @@ jobs:
     - name: Detect SuSFS Version & Prepare Release
       id: prep
       run: |
-        # 1. Tự động dò tìm phiên bản SuSFS trong mã nguồn kernel
+        # 1. Tự động dò tìm phiên bản SuSFS
         DETECTED_SUSFS=""
         
-        # Dò trong file header susfs.h (nơi định nghĩa SUSFS_VERSION thường gặp)
+        # Cách A: Dò macro SUSFS_VERSION trong tệp header
         SUSFS_HEADER=$(find . -maxdepth 4 -type f -name "susfs.h" 2>/dev/null | head -n 1)
         if [ -n "$SUSFS_HEADER" ]; then
           DETECTED_SUSFS=$(grep -E 'SUSFS_VERSION' "$SUSFS_HEADER" | head -n 1 | awk -F'"' '{print $2}')
         fi
 
-        # Nếu chưa tìm thấy, dò trực tiếp chuỗi ký tự susfs_v hoặc v1.x trong kernel image build xong
+        # Cách B: Nếu không có header, quét trực tiếp binary image bằng chuỗi strings
         if [ -z "$DETECTED_SUSFS" ]; then
           IMAGE_FILE=$(find out/ arch/ -type f \( -name "Image" -o -name "Image.gz" \) 2>/dev/null | head -n 1)
           if [ -n "$IMAGE_FILE" ]; then
@@ -127,7 +127,6 @@ jobs:
 
         # Gán nhãn cho tên file
         if [ -n "$DETECTED_SUSFS" ]; then
-          # Chuẩn hoá nếu thiếu tiền tố 'v'
           [[ "$DETECTED_SUSFS" =~ ^[0-9] ]] && DETECTED_SUSFS="v$DETECTED_SUSFS"
           SUSFS_NAME_TAG="SuSFS_${DETECTED_SUSFS}"
           SUSFS_STATUS="Có (${DETECTED_SUSFS})"
@@ -144,8 +143,6 @@ jobs:
         BUILD_TIME=$(date +"%Y%m%d_%H%M")
         mkdir -p dist
 
-        # Đổi tên file zip build ra
-        # Cấu trúc: APTKernel-[Device]-ReSukiSU_[KSU_DATE]-[SuSFS_Tag]-[Target_OS].zip
         for f in APTKernel_*.zip; do
           if [ -f "$f" ]; then
             NEW_NAME="APTKernel-${{ github.event.inputs.device }}-ReSukiSU_${KSU_DATE}-${SUSFS_NAME_TAG}-${{ github.event.inputs.target_os }}.zip"
@@ -170,7 +167,7 @@ jobs:
         ### 🛡️ Chú thích về SuSFS:
         - Bản build đã tích hợp sẵn patch **SuSFS (${DETECTED_SUSFS:-Tự động})** ở cấp Kernel.
         - Tác dụng: Hỗ trợ ẩn mount point, giấu trạng thái root/bootloader khỏi các cơ chế kiểm tra (Play Integrity MEETS_STRONG, App Ngân hàng, Game).
-        - **Cần cài đặt thêm SuSFS Module** tương thích với phiên bản SuSFS trên để cấu hình tệp tin/mount ẩn.
+        - **Cần cài đặt thêm SuSFS Module** tương thích với phiên bản SuSFS trên để cấu hình tính năng ẩn.
 
         ---
 
