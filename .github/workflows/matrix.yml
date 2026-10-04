@@ -34,7 +34,7 @@ on:
 
 jobs:
   build-kernel:
-    name: Build ${{ github.event.inputs.device }} \vert{}${{ matrix.ksu }} | ${{ matrix.susfs }} \vert{} OS:${{ github.event.inputs.target_os }}
+    name: Build ${{ github.event.inputs.device }} | ${{ matrix.ksu }} | ${{ matrix.susfs }} |  OS:${{ github.event.inputs.target_os }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -51,7 +51,6 @@ jobs:
           - ksu: sukisu-ultra
             susfs: nonesusfs
 
-
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
@@ -61,11 +60,11 @@ jobs:
     - name: Set up Environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex gawk \
+        sudo apt-get install -y bc bison build-essential binutils ccache curl flex gawk \
           git gnupg gperf imagemagick libncurses-dev \
           lib32readline-dev lib32z1-dev liblz4-tool \
           libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync \
-          schedtool squashfs-tools xsltproc zip zlib1g-dev python3
+          schedtool squashfs-tools xsltproc zip zlib1g-dev python3 jq
 
     - name: Cache ccache
       uses: actions/cache@v4
@@ -82,8 +81,21 @@ jobs:
         wget -q https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz
         tar -zxvf Clang-16.0.6-20260807.tar.gz
 
-    - name: Run Build Script
+    - name: Enable Kprobes & Run Build Script
       run: |
+        DEFCONFIG_PATH="arch/arm64/configs/${{ github.event.inputs.device }}_defconfig"
+        if [ -f "$DEFCONFIG_PATH" ]; then
+          echo ">>> Bật Kprobes trong $DEFCONFIG_PATH"
+          cat << 'EOF' >> "$DEFCONFIG_PATH"
+        CONFIG_KPROBES=y
+        CONFIG_HAVE_KPROBES=y
+        CONFIG_KPROBE_EVENTS=y
+        CONFIG_MODULES=y
+        CONFIG_KALLSYMS=y
+        CONFIG_KALLSYMS_ALL=y
+        EOF
+        fi
+
         chmod +x build_kernel.sh
         echo "Executing: ./build_kernel.sh ${{ github.event.inputs.device }}${{ matrix.ksu }} ${{ matrix.susfs }}${{ github.event.inputs.target_os }}"
         ./build_kernel.sh "${{ github.event.inputs.device }}" "${{ matrix.ksu }}" "${{ matrix.susfs }}" "${{ github.event.inputs.target_os }}"
@@ -96,31 +108,32 @@ jobs:
         fi
 
         ZIP_LIST=$(ls APTKernel_*.zip 2>/dev/null | tr '\n' ' ' || echo "Không tìm thấy tệp")
-        TAG_NAME="release-${{ github.event.inputs.device }}-${{ github.run_id }}"
+        TAG_NAME="release-${{ github.event.inputs.device }}-${{ matrix.ksu }}-${{ matrix.susfs }}-${{ github.run_id }}"
         echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
 
-        cat <<EOF > release_body.md
+        cat << 'EOF' > release_body.md
         ## 🚀 APTKernel Release - ${{ github.event.inputs.device }}
 
         ### 📦 Thông tin tệp ZIP:
-        - **Tên tệp:** \`${ZIP_LIST}\`
-        - **Mục tiêu ROM:** ${{ github.event.inputs.target_os }}
+        - **Tệp phát hành:** `${ZIP_LIST}`
+        - **Mục tiêu ROM:** `${{ github.event.inputs.target_os }}`
 
-        ### 🛡️ Trạng thái KernelSU & SuSFS:
-        | Thành phần | Có / Không | Tên cụ thể | Phiên bản / Manager khuyến nghị |
+        ### 🛡 Trạng thái KernelSU & SuSFS:
+        | Thành phần | Tích hợp | Tên cụ thể | Phiên bản / Manager khuyến nghị |
         | :--- | :--- | :--- | :--- |
-        | **KernelSU** | ${KSU_STATUS:-Không} | ${KSU_NAME:-None} (${{ matrix.ksu }}) | **Kernel:** ${KSU_TAG:-None} <br> **Manager:**${MGR_RECOMMEND} |
-        | **SuSFS** | ${SUSFS_STATUS:-Không} | ${SUSFS_NAME:-None} (${{ matrix.susfs }}) | Cấu hình cờ KSU_SUSFS |
+        | **KernelSU** | ${KSU_STATUS:-Không} |  ${KSU_NAME:-None} (`${{ matrix.ksu }}`) | **Bản:** `${KSU_TAG:-None}` <br> **Khuyên dùng:** ${MGR_RECOMMEND} |
+        | **SuSFS** | ${SUSFS_STATUS:-Không} |  ${SUSFS_NAME:-None} | Phiên bản: `${SUSFS_TAG:-None}` |
 
         ---
-        *Bản dựng tự động từ GitHub Actions cho thiết bị: ${{ github.event.inputs.device }}*
+        > **Lưu ý:** Nếu sử dụng biến thể **ReSukiSU**, vui lòng sử dụng đúng phiên bản Manager tương thích với ngày mã nguồn kernel (`${KSU_TAG}`) để tránh xung đột API.
         EOF
 
     - name: Publish to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.gen_notes.outputs.tag_name }}
-        name: "APTKernel [${{ github.event.inputs.device }}] \vert{}${{ matrix.ksu }} | ${{ matrix.susfs }} \vert{} OS:${{ github.event.inputs.target_os }}"
+        name: "APTKernel [${{ github.event.inputs.device }}] | ${{ matrix.ksu }} | ${{ matrix.susfs }} | OS:${{ github.event.inputs.target_os }}"
+
         body_path: release_body.md
         files: APTKernel_*.zip
       env:
