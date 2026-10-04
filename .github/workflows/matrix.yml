@@ -1,4 +1,4 @@
-name: Build Kernel matric ksu
+name: Build Kernel matrix ksu
 
 on:
   workflow_dispatch:
