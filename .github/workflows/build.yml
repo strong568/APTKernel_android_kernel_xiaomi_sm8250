@@ -95,4 +95,19 @@ jobs:
       with:
         name: APTKernel-${{ github.event.inputs.device }}-${{ github.event.inputs.target_os }}-${{ github.run_id }}
         path: APTKernel_*.zip
-        compression-level: 0 # 已经被 zip 压缩过，无需再二次压缩
+        compression-level: 0 
+        
+    - name: Publish to GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event.inputs.device }}-${{ github.run_id }}
+        name: "APTKernel for ${{ github.event.inputs.device }} [${{ github.event.inputs.target_os }}]"
+        body: |
+          ### Kernel Build Information
+          - **Device:** `${{ github.event.inputs.device }}`
+          - **Target OS:** `${{ github.event.inputs.target_os }}`
+          - **KernelSU Enabled:** `${{ github.event.inputs.ksu }}`
+          - **Build Run ID:** `${{ github.run_id }}`
+        files: APTKernel_*.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
