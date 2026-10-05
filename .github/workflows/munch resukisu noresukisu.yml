@@ -42,7 +42,7 @@ permissions:
 
 jobs:
   build-kernel:
-    name: Build ${{ github.event.inputs.device }} | KSU:${{ github.event.inputs.ksu }} \vert{} OS:${{ github.event.inputs.target_os }}
+    name: Build ${{ github.event.inputs.device }} | KSU:${{ github.event.inputs.ksu }} | OS:${{ github.event.inputs.target_os }}
     runs-on: ubuntu-latest
 
     steps:
