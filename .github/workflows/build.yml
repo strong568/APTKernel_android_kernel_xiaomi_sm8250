@@ -39,7 +39,7 @@ on:
 
 jobs:
   build-kernel:
-    name: Build ${{ github.event.inputs.device }} | KSU:${{ github.event.inputs.ksu }} \vert{} OS:${{ github.event.inputs.target_os }}
+    name: Build ${{ github.event.inputs.device }} | KSU:${{ github.event.inputs.ksu }} | OS:${{ github.event.inputs.target_os }}
     runs-on: ubuntu-latest
     permissions:
       contents: write   # Allows creating tags, releases, and uploading assets
@@ -87,7 +87,7 @@ jobs:
         fi
         
         if [ "${{ github.event.inputs.target_os }}" != "both" ]; then
-          ARGS="$ARGS${{ github.event.inputs.target_os }}"
+          ARGS="$ARGS ${{ github.event.inputs.target_os }}"
         fi
         
         echo "Executing command: ./build_kernel.sh $ARGS"
