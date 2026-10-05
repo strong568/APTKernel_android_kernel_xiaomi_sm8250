@@ -73,11 +73,12 @@ jobs:
     - name: Setup ReSukiSU & Patch for 4.19 Non-GKI
       id: ksu_info
       run: |
-        # 1. Bật Kprobes trước trong defconfig để ReSukiSU nhận diện chế độ Kprobes
+        # 1. Bật Kprobes trong defconfig để ReSukiSU nhận diện môi trường Non-GKI
         DEFCONFIG_PATH="arch/arm64/configs/${{ github.event.inputs.device }}_defconfig"
         if [ -f "$DEFCONFIG_PATH" ]; then
           echo ">>> Injecting Kprobes into $DEFCONFIG_PATH..."
-          sed -i '/CONFIG_KSU_TP_HOOK/d' "$DEFCONFIG_PATH"
+          sed -i '/CONFIG_KSU/d' "$DEFCONFIG_PATH"
+          sed -i '/CONFIG_KPROBE/d' "$DEFCONFIG_PATH"
           cat << 'EOF' >> "$DEFCONFIG_PATH"
         CONFIG_KPROBES=y
         CONFIG_HAVE_KPROBES=y
@@ -85,6 +86,7 @@ jobs:
         CONFIG_MODULES=y
         CONFIG_KALLSYMS=y
         CONFIG_KALLSYMS_ALL=y
+        CONFIG_KSU=y
         CONFIG_KSU_KPROBES_HOOK=y
         # CONFIG_KSU_TP_HOOK is not set
         EOF
@@ -93,7 +95,7 @@ jobs:
         echo "Setting up ReSukiSU..."
         curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
-        # 2. Dò thư mục KernelSU
+        # 2. Định vị thư mục KernelSU
         KSU_DIR=""
         if [ -d "drivers/kernelsu" ]; then
           KSU_DIR="drivers/kernelsu"
@@ -101,14 +103,13 @@ jobs:
           KSU_DIR="KernelSU"
         fi
 
-        # 3. Vô hiệu hóa cảnh báo Non-GKI TP hook và ép Kprobes hook trong Kbuild
+        # 3. Vá Kbuild: Xóa hoàn toàn điều kiện $(error ...) dừng tiến trình
         if [ -n "$KSU_DIR" ]; then
-          echo "Found ReSukiSU in $KSU_DIR. Patching Kbuild and Makefile..."
+          echo "Found ReSukiSU in $KSU_DIR. Patching Kbuild..."
           
-          # Comment out dòng thông báo lỗi $(error TP hooks are...)
-          sed -i 's/$(error TP hooks are incompatible/# $(error TP hooks are incompatible/g' "$KSU_DIR/Kbuild" 2>/dev/null || true
-          sed -i 's/$(error TP hooks are only supported/# $(error TP hooks are only supported/g' "$KSU_DIR/Kbuild" 2>/dev/null || true
-          sed -i '/TP hooks are incompatible with Non-GKI/s/^/#/' "$KSU_DIR/Kbuild" 2>/dev/null || true
+          # Xóa toàn bộ các dòng kiểm tra và cảnh báo TP hooks
+          sed -i '/TP hooks/d' "$KSU_DIR/Kbuild" 2>/dev/null || true
+          sed -i '/incompatible with Non-GKI/d' "$KSU_DIR/Kbuild" 2>/dev/null || true
           
           # Ép cờ KPROBES hook thay vì TP hook
           sed -i 's/-DKSU_TP_HOOK/-DKSU_KPROBES_HOOK/g' "$KSU_DIR/Kbuild" 2>/dev/null || true
@@ -125,11 +126,15 @@ jobs:
         echo "ksu_commit=$KSU_COMMIT" >> $GITHUB_OUTPUT
         echo "ReSukiSU Commit Date: $KSU_DATE ($KSU_COMMIT)"
 
-
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
 
+        # Ngăn build_kernel.sh chạy lại curl setup.sh đè mất bản vá Kbuild
+        # Thay thế lệnh gọi setup.sh trong build_kernel.sh thành lệnh no-op (echo)
+        sed -i 's|curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash|echo "[*] ReSukiSU already patched"|g' build_kernel.sh || true
+
+        # Đảm bảo có khoảng trắng giữa các đối số
         ARGS="${{ github.event.inputs.device }} resukisu"
 
         if [ "${{ github.event.inputs.target_os }}" != "both" ]; then
@@ -144,13 +149,13 @@ jobs:
       run: |
         DETECTED_SUSFS=""
         
-        # Quét phiên bản trong file header susfs.h
+        # 1. Quét phiên bản trong file header susfs.h
         SUSFS_HEADER=$(find . -maxdepth 4 -type f -name "susfs.h" 2>/dev/null | head -n 1)
         if [ -n "$SUSFS_HEADER" ]; then
           DETECTED_SUSFS=$(grep -E 'SUSFS_VERSION' "$SUSFS_HEADER" | head -n 1 | awk -F'"' '{print $2}')
         fi
 
-        # Quét dự phòng trực tiếp trong binary kernel Image
+        # 2. Quét dự phòng trực tiếp trong binary Image vừa build
         if [ -z "$DETECTED_SUSFS" ]; then
           IMAGE_FILE=$(find out/ out_aosp/ out_miui/ arch/ -type f \( -name "Image" -o -name "Image.gz" \) 2>/dev/null | head -n 1)
           if [ -n "$IMAGE_FILE" ]; then
@@ -194,7 +199,7 @@ jobs:
 
         ---
 
-        ### 🛡️ Chú thích về SuSFS:
+        ### 🛡️️ Chú thích về SuSFS:
         - Bản build đã tích hợp sẵn patch **SuSFS (${DETECTED_SUSFS:-Tự động})** ở cấp Kernel.
         - Tác dụng: Hỗ trợ ẩn mount point, giấu trạng thái root/bootloader khỏi các cơ chế kiểm tra (Play Integrity MEETS_STRONG, App Ngân hàng, Game).
         - **Cần cài đặt thêm SuSFS Module** tương thích với phiên bản SuSFS trên để cấu hình tính năng ẩn.
@@ -204,7 +209,7 @@ jobs:
         ### 📲 Khuyên dùng phiên bản Manager:
         - **Manager khuyến nghị:** **ReSukiSU / SukiSU Manager (Bản phát hành ngày ${KSU_DATE} hoặc mới hơn gần nhất)**
         - **Tải Manager chính thức:** [ReSukiSU Releases trên GitHub](https://github.com/ReSukiSU/ReSukiSU/releases)
-        *(Vui lòng dùng đúng Manager tương ứng với ngày build ${KSU_DATE} của Kernel để tránh lỗi không nhận quyền root).*
+        *(Vui lòng dùng đúng Manager tương ứng với ngày build ${KSU_DATE} của Kernel để tránh xung đột API).*
         EOF
 
         echo "tag_name=${{ github.event.inputs.device }}-ReSukiSU-${KSU_DATE}-${BUILD_TIME}" >> $GITHUB_OUTPUT
