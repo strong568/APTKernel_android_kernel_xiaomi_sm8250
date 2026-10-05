@@ -109,6 +109,15 @@ sed -i "s/^device\.name1=.*/device.name1=${DEVICE_NAME}/" anykernel/anykernel.sh
 echo "[*] AnyKernel3 adjusted successfully."
 echo "==========================================="
 
+
+# ------------------------------------------
+# 6. 67W Fast Charging & True Bypass Charging (SenseiiX fusionX_sm8250 tested)
+# ------------------------------------------
+if [ -f "apply-fastcharge-bypass.py" ]; then
+    echo "[*] Applying 67W Fast Charge & True Bypass Charging patches..."
+    python3 apply-fastcharge-bypass.py
+fi
+
 # ==========================================
 # Modular Build Function
 # ==========================================
