@@ -218,6 +218,185 @@ build_target() {
     TARGET_DEVICE="${DEVICE_NAME}"
     KSU_ENABLE="${ENABLE_KSU}"
 
+    # 1. Baseband-guard configuration
+    echo "[*] Injecting Baseband-guard configuration..."
+    scripts/config --file "${OUT_DIR}/.config" -e BBG
+
+    # 2. KernelSU / SukiSU / SuSFS Configuration
+    if [ "$KSU_ENABLE" -eq 1 ]; then
+        echo "[*] Injecting KernelSU (SukiSU-Ultra) & SuSFS configurations..."
+        scripts/config --file "${OUT_DIR}/.config" \
+            -e KSU \
+            -e KSU_KPROBES_HOOK \
+            -d KSU_TP_HOOK \
+            -d KSU_MANUAL_HOOK \
+            -e KSU_SUSFS \
+            -e KSU_SUSFS_HAS_MAGIC_MOUNT \
+            -e KSU_SUSFS_SUS_MOUNT \
+            -e KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT \
+            -e KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT \
+            -e KSU_SUSFS_SUS_KSTAT \
+            -d KSU_SUSFS_SUS_OVERLAYFS \
+            -e KSU_SUSFS_TRY_UMOUNT \
+            -e KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT \
+            -e KSU_SUSFS_SPOOF_UNAME \
+            -e KSU_SUSFS_ENABLE_LOG \
+            -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+            -e KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+            -d KSU_SUSFS_OPEN_REDIRECT \
+            -d KSU_SUSFS_SUS_SU \
+            -e KPM \
+            -e KPROBES \
+            -e HAVE_KPROBES \
+            -e KPROBE_EVENTS \
+            -e MODULES \
+            -e KALLSYMS \
+            -e KALLSYMS_ALL \
+            -e THREAD_INFO_IN_TASK
+    else
+        scripts/config --file "${OUT_DIR}/.config" -d KSU
+    fi
+
+    # 3. Tweaks dùng chung cho cả 2 bản
+    echo "[*] Injecting common performance & subsystem tweaks..."
+    scripts/config --file "${OUT_DIR}/.config" \
+        -e OVERLAY_FS \
+        -d DEBUG_FS \
+        -d LTO_CLANG \
+        -d LOCALVERSION_AUTO \
+        -e TASK_DELAY_ACCT \
+        -d CONFIG_MODULE_SIG_SHA512 \
+        -d CONFIG_MODULE_SIG_HASH
+
+    # 4. Tách biệt cấu hình đặc thù MIUI vs AOSP
+    if [ "$OS_TYPE" == "miui" ]; then
+        echo "[*] Injecting MIUI specific configurations..."
+        scripts/config --file "${OUT_DIR}/.config" \
+            --set-str STATIC_USERMODEHELPER_PATH /system/bin/micd \
+            -e PERF_CRITICAL_RT_TASK \
+            -e SF_BINDER \
+            -e MIGT \
+            -e MIGT_ENERGY_MODEL \
+            -e MIHW \
+            -e PACKAGE_RUNTIME_INFO \
+            -e BINDER_OPT \
+            -e KPERFEVENTS \
+            -e MILLET \
+            -e PERF_HUMANTASK \
+            -e XIAOMI_MIUI \
+            -d MI_MEMORY_SYSFS \
+            -e MIUI_ZRAM_MEMORY_TRACKING \
+            -e MI_FRAGMENTION \
+            -e PERF_HELPER \
+            -e BOOTUP_RECLAIM \
+            -e MI_RECLAIM \
+            -e RTMM \
+            -e LTO_NONE \
+            -d SHADOW_CALL_STACK \
+            -e MILLET_CGROUP \
+            -e MILLET_SIG \
+            -e MILLET_BINDER \
+            -e MILLET_PKG \
+            -e MILLET_BINDER_GKI \
+            -e MILLET_CORE \
+            -e MILLET_HS \
+            -e BINDER_PRIO \
+            -d REKERNEL \
+            -d REKERNEL_NETWORK
+    elif [ "$OS_TYPE" == "aosp" ]; then
+        echo "[*] Injecting AOSP specific configurations..."
+        scripts/config --file "${OUT_DIR}/.config" \
+            -e REKERNEL \
+            -e REKERNEL_NETWORK
+    fi
+
+    # Update dependencies against injected configurations
+    echo "[*] Updating config (make olddefconfig)..."
+    make "${MAKE_OPTS[@]}" olddefconfig
+
+    # ----------------------------------------------------
+    # Compilation: Chỉ định rõ các target Image và dtbs
+    # ----------------------------------------------------
+    echo "[*] Building kernel..."
+    make "${MAKE_OPTS[@]}" Image dtbs modules
+
+
+    # Restore DTS backup for MIUI
+    if [ "$OS_TYPE" == "miui" ]; then
+        echo "[*] Restoring DTS backups..."
+        rm -rf "${DTS_SOURCE}"
+        mv "${DTS_BACKUP}" "${DTS_SOURCE}"
+    fi
+
+    echo "==========================================="
+    if [ -f "${OUT_DIR}/arch/arm64/boot/Image" ]; then
+        echo "[+] $OS_TYPE Build Successful!"
+        echo "[+] Kernel Image path: ${OUT_DIR}/arch/arm64/boot/Image"
+
+        echo "[*] Packaging to AnyKernel3 ($OS_TYPE)..."
+        rm -rf anykernel/kernels/*
+        mkdir -p "anykernel/kernels/${OS_TYPE}/"
+        
+        cp "${OUT_DIR}/arch/arm64/boot/Image" "anykernel/kernels/${OS_TYPE}/"
+        cp "${OUT_DIR}/arch/arm64/boot/dtb" "anykernel/kernels/${OS_TYPE}/"
+        
+        if [ -f "${OUT_DIR}/arch/arm64/boot/dtbo.img" ]; then
+            cp "${OUT_DIR}/arch/arm64/boot/dtbo.img" "anykernel/kernels/${OS_TYPE}/"
+        fi
+        
+        local KSU_ZIP_STR="NoKernelSU"
+        if [ "$ENABLE_KSU" -eq 1 ]; then
+            KSU_ZIP_STR="SukiSU-SuSFS"
+        fi
+        local GIT_COMMIT_ID=$(git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
+        local OS_UPPER=$(echo "$OS_TYPE" | tr '[:lower:]' '[:upper:]')
+        local ZIP_FILENAME="APTKernel_${OS_UPPER}_${DEVICE_NAME}_${KSU_ZIP_STR}_$(date +'%Y%m%d_%H%M%S')_anykernel3_${GIT_COMMIT_ID}.zip"
+        
+        echo "[*] Zipping $ZIP_FILENAME ..."
+        pushd anykernel > /dev/null
+        zip -r9 "$ZIP_FILENAME" ./* -x .git .gitignore out/ ./*.zip > /dev/null
+        mv "$ZIP_FILENAME" ../
+        popd > /dev/null
+        
+        echo "[+] $OS_TYPE kernel binaries successfully packed into: $ZIP_FILENAME"
+    else
+        echo "[-] $OS_TYPE Build Failed. Kernel Image not found."
+        exit 1
+    fi
+}
+
+# ==========================================
+# Execute builds based on target OS
+# ==========================================
+if [ "$TARGET_OS" == "aosp" ] || [ "$TARGET_OS" == "both" ]; then
+    build_target "aosp"
+fi
+
+if [ "$TARGET_OS" == "miui" ] || [ "$TARGET_OS" == "both" ]; then
+    build_target "miui"
+fi
+
+echo "==========================================="
+echo "[*] ccache stats:"
+ccache -s
+echo "[+] All requested builds completed!"
+RCE}/dsi-panel-j1s-42-02-0a-mp-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 00 00 05 51 07 FF 00 00/39 01 00 00 00 00 05 51 07 FF 00 00/g' ${DTS_SOURCE}/dsi-panel-j2-mp-42-02-0b-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 00 00 05 51 07 FF 00 00/39 01 00 00 00 00 05 51 07 FF 00 00/g' ${DTS_SOURCE}/dsi-panel-j2-p2-1-42-02-0b-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 00 00 05 51 07 FF 00 00/39 01 00 00 00 00 05 51 07 FF 00 00/g' ${DTS_SOURCE}/dsi-panel-j2s-mp-42-02-0a-dsc-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 01 00 03 51 03 FF/39 01 00 00 01 00 03 51 03 FF/g' ${DTS_SOURCE}/dsi-panel-j11-38-08-0a-fhd-cmd.dtsi || true
+        sed -i 's/\/\/39 01 00 00 11 00 03 51 03 FF/39 01 00 00 11 00 03 51 03 FF/g' ${DTS_SOURCE}/dsi-panel-j2-p2-1-38-0c-0a-dsc-cmd.dtsi || true
+    fi
+
+    echo "[*] Making defconfig: ${DEFCONFIG}..."
+    make "${MAKE_OPTS[@]}" "${DEFCONFIG}"
+
+    # ----------------------------------------------------
+    # Configuration tweaks
+    # ----------------------------------------------------
+    TARGET_DEVICE="${DEVICE_NAME}"
+    KSU_ENABLE="${ENABLE_KSU}"
+
     # 1. Baseband-guard configuration (Always applied)
     echo "[*] Injecting Baseband-guard configuration..."
     scripts/config --file "${OUT_DIR}/.config" -e BBG
