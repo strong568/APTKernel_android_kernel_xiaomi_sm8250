@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       device:
-        description: 'Target Device Code (设备代号)'
+        description: 'Target Device Code (Device)'
         required: true
         default: 'munch'
         type: choice
@@ -23,12 +23,12 @@ on:
           - thyme
           - umi
       ksu:
-        description: 'Enable KernelSU (ReSukiSU)'
+        description: 'Enable KernelSU (SukiSU-Ultra)'
         required: true
         type: boolean
-        default: false
+        default: true
       target_os:
-        description: 'Target OS (目标系统)'
+        description: 'Target OS'
         required: true
         type: choice
         default: 'both'
@@ -39,15 +39,14 @@ on:
 
 jobs:
   build-kernel:
-    name: Build ${{ github.event.inputs.device }} | KSU:${{ github.event.inputs.ksu }} | OS:${{ github.event.inputs.target_os }}
+    name: Build ${{ github.event.inputs.device }} | KSU:${{ github.event.inputs.ksu }} \vert{} OS:${{ github.event.inputs.target_os }}
     runs-on: ubuntu-latest
     permissions:
       contents: write   # Allows creating tags, releases, and uploading assets
-      
-    
+
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v7
+      uses: actions/checkout@v4
       with:
         fetch-depth: 1
 
@@ -58,16 +57,15 @@ jobs:
           git gnupg gperf imagemagick libncurses-dev \
           lib32readline-dev lib32z1-dev liblz4-tool \
           libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync \
-          schedtool squashfs-tools xsltproc zip zlib1g-dev python3
-          
+          schedtool squashfs-tools xsltproc zip zlib1g-dev python3 jq
+
     - name: Cache ccache
-      uses: actions/cache@v6
+      uses: actions/cache@v4
       with:
         path: ~/.cache/ccache_mikernel
         key: ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-${{ github.run_id }}
         restore-keys: |
-          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-
-          ${{ runner.os }}-kernel-ccache-
+          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-${{ runner.os }}-kernel-ccache-
 
     - name: Setup zyc-clang 16 Toolchain
       run: |
@@ -83,53 +81,51 @@ jobs:
         ARGS="${{ github.event.inputs.device }}"
         
         if [ "${{ github.event.inputs.ksu }}" == "true" ]; then
-          ARGS="$ARGS ksu"
+          ARGS="$ARGS sukisu"
+        else
+          ARGS="$ARGS noneksu"
         fi
         
         if [ "${{ github.event.inputs.target_os }}" != "both" ]; then
-          ARGS="$ARGS ${{ github.event.inputs.target_os }}"
+          ARGS="$ARGS${{ github.event.inputs.target_os }}"
         fi
         
         echo "Executing command: ./build_kernel.sh $ARGS"
         ./build_kernel.sh $ARGS
-        
+
     - name: Prepare Release Metadata
       id: meta
       run: |
-        # 1. Lấy ngày giờ build (UTC+7)
         BUILD_DATE=$(TZ="Asia/Ho_Chi_Minh" date '+%Y-%m-%d %H:%M:%S (UTC+7)')
         echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
 
-        # 2. Xác định thông tin Manager tương ứng
         if [ "${{ github.event.inputs.ksu }}" == "true" ]; then
-          # Đọc mã version KSU nếu kernel có định nghĩa (thường ở drivers/kernelsu/Makefile hoặc KernelSU)
           KSU_VER=$(grep -E 'KERNELSU_VERSION|KS_VERSION' drivers/kernelsu/Makefile 2>/dev/null | head -n 1 | awk -F':=' '{print $2}' | tr -d ' ' || true)
           
           if [ -n "$KSU_VER" ]; then
             KSU_DETAIL="Version Driver: \`$KSU_VER\`"
           else
-            KSU_DETAIL="ReSukiSU Driver tích hợp"
+            KSU_DETAIL="SukiSU-Ultra Driver tích hợp"
           fi
 
-          MANAGER_TEXT="- **Trạng thái Root:** Đã bật ReSukiSU / KernelSU ($KSU_DETAIL)\n- **Manager tương thích:** Cần cài đặt **ReSukiSU Manager** hoặc **KernelSU Manager** tương ứng.\n  - 🔗 [Tải ReSukiSU Manager](https://github.com/ReSukiSU/ReSukiSU/releases)\n  - 🔗 [Tải SukiSU-Ultra Manager](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases)\n  - ⚠️ *Lưu ý:* Luôn dùng phiên bản Manager phát hành cùng thời điểm với mã nguồn kernel để tránh lỗi *Driver not installed* hoặc *API mismatch*."
+          MANAGER_TEXT="- **Trạng thái Root:** Đã bật SukiSU-Ultra ($KSU_DETAIL)\n- **Manager khuyến nghị:** Cài đặt **SukiSU-Ultra Manager** chính thức.\n  - 🔗 [Tải SukiSU-Ultra Manager trên GitHub](https://github.com/ShirkNeko/SukiSU-Ultra/releases)\n  - ⚠️ *Lưu ý:* Luôn cài Manager bản mới nhất để tránh lỗi mismatch API."
         else
           MANAGER_TEXT="- **Trạng thái Root:** Không bật KSU (Stock kernel, không cần cài Manager)."
         fi
 
-        # Lưu nội dung multi-line vào output
         {
           echo "manager_info<<EOF"
           echo -e "$MANAGER_TEXT"
           echo "EOF"
         } >> $GITHUB_OUTPUT
-        
+
     - name: Upload Flashable ZIP
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@v4
       with:
         name: APTKernel-${{ github.event.inputs.device }}-${{ github.event.inputs.target_os }}-${{ github.run_id }}
         path: APTKernel_*.zip
-        compression-level: 0 
-        
+        compression-level: 0
+
     - name: Publish to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
