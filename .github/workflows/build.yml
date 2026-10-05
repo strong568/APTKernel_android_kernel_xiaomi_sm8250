@@ -92,7 +92,37 @@ jobs:
         
         echo "Executing command: ./build_kernel.sh $ARGS"
         ./build_kernel.sh $ARGS
+        
+    - name: Prepare Release Metadata
+      id: meta
+      run: |
+        # 1. Lấy ngày giờ build (UTC+7)
+        BUILD_DATE=$(TZ="Asia/Ho_Chi_Minh" date '+%Y-%m-%d %H:%M:%S (UTC+7)')
+        echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
 
+        # 2. Xác định thông tin Manager tương ứng
+        if [ "${{ github.event.inputs.ksu }}" == "true" ]; then
+          # Đọc mã version KSU nếu kernel có định nghĩa (thường ở drivers/kernelsu/Makefile hoặc KernelSU)
+          KSU_VER=$(grep -E 'KERNELSU_VERSION|KS_VERSION' drivers/kernelsu/Makefile 2>/dev/null | head -n 1 | awk -F':=' '{print $2}' | tr -d ' ' || true)
+          
+          if [ -n "$KSU_VER" ]; then
+            KSU_DETAIL="Version Driver: \`$KSU_VER\`"
+          else
+            KSU_DETAIL="ReSukiSU Driver tích hợp"
+          fi
+
+          MANAGER_TEXT="- **Trạng thái Root:** Đã bật ReSukiSU / KernelSU ($KSU_DETAIL)\n- **Manager tương thích:** Cần cài đặt **ReSukiSU Manager** hoặc **KernelSU Manager** tương ứng.\n  - 🔗 [Tải ReSukiSU Manager](https://github.com/ReSukiSU/ReSukiSU/releases)\n  - 🔗 [Tải SukiSU-Ultra Manager](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases)\n  - ⚠️ *Lưu ý:* Luôn dùng phiên bản Manager phát hành cùng thời điểm với mã nguồn kernel để tránh lỗi *Driver not installed* hoặc *API mismatch*."
+        else
+          MANAGER_TEXT="- **Trạng thái Root:** Không bật KSU (Stock kernel, không cần cài Manager)."
+        fi
+
+        # Lưu nội dung multi-line vào output
+        {
+          echo "manager_info<<EOF"
+          echo -e "$MANAGER_TEXT"
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
+        
     - name: Upload Flashable ZIP
       uses: actions/upload-artifact@v7
       with:
@@ -104,13 +134,17 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ github.event.inputs.device }}-${{ github.run_id }}
-        name: "APTKernel for ${{ github.event.inputs.device }} [${{ github.event.inputs.target_os }}]"
+        name: "APTKernel for ${{ github.event.inputs.device }} [${{ github.event.inputs.target_os }}] -${{ steps.meta.outputs.build_date }}"
         body: |
-          ### Kernel Build Information
-          - **Device:** `${{ github.event.inputs.device }}`
-          - **Target OS:** `${{ github.event.inputs.target_os }}`
-          - **KernelSU Enabled:** `${{ github.event.inputs.ksu }}`
+          ### 📦 Kernel Build Information
+          - **Thiết bị (Device):** `${{ github.event.inputs.device }}`
+          - **Hệ điều hành (Target OS):** `${{ github.event.inputs.target_os }}`
+          - **Thời gian build:** `${{ steps.meta.outputs.build_date }}`
           - **Build Run ID:** `${{ github.run_id }}`
+
+          ---
+          ### 🔑 Hướng dẫn Manager & Root
+          ${{ steps.meta.outputs.manager_info }}
         files: APTKernel_*.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
