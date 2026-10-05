@@ -8,10 +8,10 @@ set -e
 # ==========================================
 if [ -z "$1" ]; then
     echo "[!] Error: No device specified."
-    echo "Usage: $0 <device_name> [ksu|SukiSU|sukisu] [miui|aosp|both]"
+    echo "Usage: $0 <device_name> [ksu|sukisu|sukisu-ultra|resukisu] [miui|aosp|both]"
     echo "Example: $0 munch"
-    echo "         $0 munch SukiSU"
-    echo "         $0 munch SukiSU miui"
+    echo "         $0 munch sukisu"
+    echo "         $0 munch sukisu miui"
     echo "         $0 munch noneksu aosp"
     exit 1
 fi
@@ -32,7 +32,7 @@ TARGET_OS="both"
 shift
 # Parse remaining arguments loosely
 for arg in "$@"; do
-    case "$(echo "$arg" | tr '[:upper:]' '[:lower:]')" in
+    case "$arg" in
         ksu|sukisu|sukisu-ultra|resukisu) ENABLE_KSU=1 ;;
         noneksu) ENABLE_KSU=0 ;;
         miui) TARGET_OS="miui" ;;
@@ -71,14 +71,14 @@ echo "[*] Setting up ccache in $CCACHE_DIR..."
 mkdir -p "$CCACHE_DIR"
 
 # ==========================================
-# KernelSU Setup
+# KernelSU Setup (SukiSU-Ultra)
 # ==========================================
 if [ "$ENABLE_KSU" -eq 1 ]; then
     echo "==========================================="
-    echo " [*] Initializing KernelSU (SukiSU) Setup"
+    echo " [*] Initializing KernelSU (SukiSU-Ultra) Setup"
     echo "==========================================="
     if [ ! -d "drivers/kernelsu" ] && [ ! -d "KernelSU" ]; then
-        echo "[*] Downloading and running SukiSU remote setup script..."
+        echo "[*] Downloading and running SukiSU-Ultra remote setup script..."
         curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/main/kernel/setup.sh" | bash
     else
         echo "[*] SukiSU directory detected. Skipping setup.sh to preserve patches."
@@ -215,54 +215,82 @@ build_target() {
     # ----------------------------------------------------
     # Configuration tweaks
     # ----------------------------------------------------
-    
+    TARGET_DEVICE="${DEVICE_NAME}"
+    KSU_ENABLE="${ENABLE_KSU}"
+
     # 1. Baseband-guard configuration (Always applied)
     echo "[*] Injecting Baseband-guard configuration..."
     scripts/config --file "${OUT_DIR}/.config" -e BBG
 
-    # 2. KernelSU & Kprobes (Non-GKI 4.19) configurations
-    if [ "$ENABLE_KSU" -eq 1 ]; then
-        echo "[*] Injecting KernelSU (SukiSU Kprobes) & SUSFS configurations..."
+    # 2. KernelSU / SUSFS / KPM Configuration
+    if [ "$KSU_ENABLE" -eq 1 ]; then
+        echo "[*] Injecting KernelSU & SuSFS configurations..."
         scripts/config --file "${OUT_DIR}/.config" \
             -e KSU \
-            -e KSU_KPROBES_HOOK \
-            -d KSU_TP_HOOK \
+            -e KSU_MANUAL_HOOK \
+            -e KSU_SUSFS_HAS_MAGIC_MOUNT \
+            -d KSU_SUSFS_SUS_PATH \
+            -e KSU_SUSFS_SUS_MOUNT \
+            -e KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT \
+            -e KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT \
+            -e KSU_SUSFS_SUS_KSTAT \
+            -d KSU_SUSFS_SUS_OVERLAYFS \
+            -e KSU_SUSFS_TRY_UMOUNT \
+            -e KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT \
+            -e KSU_SUSFS_SPOOF_UNAME \
+            -e KSU_SUSFS_ENABLE_LOG \
+            -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+            -e KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+            -d KSU_SUSFS_OPEN_REDIRECT \
+            -d KSU_SUSFS_SUS_SU \
+            -e KPM \
             -e KPROBES \
             -e HAVE_KPROBES \
             -e KPROBE_EVENTS \
             -e MODULES \
             -e KALLSYMS \
             -e KALLSYMS_ALL \
-            -e THREAD_INFO_IN_TASK \
-            -e KSU_SUSFS
+            -e THREAD_INFO_IN_TASK
+    else
+        scripts/config --file "${OUT_DIR}/.config" -d KSU
     fi
 
-    # 3. MIUI configurations
+    # 3. Performance & System Tweaks (MIUI / HyperOS optimizations)
+    echo "[*] Injecting performance, scheduler & subsystem tweaks..."
+    scripts/config --file "${OUT_DIR}/.config" \
+        --set-str STATIC_USERMODEHELPER_PATH /system/bin/micd \
+        -e PERF_CRITICAL_RT_TASK \
+        -e SF_BINDER \
+        -e OVERLAY_FS \
+        -d DEBUG_FS \
+        -e MIGT \
+        -e MIGT_ENERGY_MODEL \
+        -e MIHW \
+        -e PACKAGE_RUNTIME_INFO \
+        -e BINDER_OPT \
+        -e KPERFEVENTS \
+        -e MILLET \
+        -e PERF_HUMANTASK \
+        -d LTO_CLANG \
+        -d LOCALVERSION_AUTO \
+        -e SF_BINDER \
+        -e XIAOMI_MIUI \
+        -d MI_MEMORY_SYSFS \
+        -e TASK_DELAY_ACCT \
+        -e MIUI_ZRAM_MEMORY_TRACKING \
+        -d CONFIG_MODULE_SIG_SHA512 \
+        -d CONFIG_MODULE_SIG_HASH \
+        -e MI_FRAGMENTION \
+        -e PERF_HELPER \
+        -e BOOTUP_RECLAIM \
+        -e MI_RECLAIM \
+        -e RTMM
+
+    # 4. Target OS Specific configurations
     if [ "$OS_TYPE" == "miui" ]; then
-        echo "[*] Injecting MIUI specific configurations..."
         scripts/config --file "${OUT_DIR}/.config" \
-            --set-str STATIC_USERMODEHELPER_PATH /system/bin/micd \
-            -e PERF_CRITICAL_RT_TASK \
-            -e SF_BINDER \
-            -e OVERLAY_FS \
-            -e MIGT \
-            -e MIGT_ENERGY_MODEL \
-            -e MIHW \
-            -e PACKAGE_RUNTIME_INFO \
-            -e BINDER_OPT \
-            -e KPERFEVENTS \
-            -e PERF_HUMANTASK \
-            -d LTO_CLANG \
             -e LTO_NONE \
             -d SHADOW_CALL_STACK \
-            -e XIAOMI_MIUI \
-            -d MI_MEMORY_SYSFS \
-            -e TASK_DELAY_ACCT \
-            -e MIUI_ZRAM_MEMORY_TRACKING \
-            -e PERF_HELPER \
-            -e BOOTUP_RECLAIM \
-            -e MI_RECLAIM \
-            -e RTMM \
             -e MILLET_CGROUP \
             -e MILLET_SIG \
             -e MILLET_BINDER \
@@ -273,11 +301,7 @@ build_target() {
             -e BINDER_PRIO \
             -d REKERNEL \
             -d REKERNEL_NETWORK
-    fi
-
-    # 4. AOSP configurations
-    if [ "$OS_TYPE" == "aosp" ]; then
-        echo "[*] Injecting AOSP specific configurations..."
+    elif [ "$OS_TYPE" == "aosp" ]; then
         scripts/config --file "${OUT_DIR}/.config" \
             -e REKERNEL \
             -e REKERNEL_NETWORK
@@ -287,11 +311,6 @@ build_target() {
     echo "[*] Updating config (make olddefconfig)..."
     make "${MAKE_OPTS[@]}" olddefconfig
 
-    # ----------------------------------------------------
-    # Compilation
-    # ----------------------------------------------------
-    echo "[*] Building kernel..."
-    make "${MAKE_OPTS[@]}" 
 
     # Restore DTS backup for MIUI
     if [ "$OS_TYPE" == "miui" ]; then
