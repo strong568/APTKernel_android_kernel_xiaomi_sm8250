@@ -41,6 +41,9 @@ jobs:
   build-kernel:
     name: Build ${{ github.event.inputs.device }} | KSU:${{ github.event.inputs.ksu }} | OS:${{ github.event.inputs.target_os }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Allows creating tags, releases, and uploading assets
+      
     
     steps:
     - name: Checkout Repository
