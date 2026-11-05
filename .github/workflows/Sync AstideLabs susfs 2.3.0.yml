@@ -1,0 +1,41 @@
+name: Sync AstideLabs PR susfs 2.3.0 #74
+
+on:
+  schedule:
+    # Chạy tự động vào 00:00 UTC (7h sáng giờ VN) mỗi ngày
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    # Bật nút Run workflow để bạn có thể chạy thủ công bất cứ lúc nào
+
+permissions:
+  contents: write # Cấp quyền ghi để Actions Bot có thể push code
+
+jobs:
+  sync-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          ref: AstideLabs_Susfs_2.3.0
+          fetch-depth: 0 # Tải toàn bộ lịch sử để tránh lỗi commit tree
+
+      - name: Fetch and Sync PR #74
+        run: |
+          # 1. Cấu hình danh tính cho Bot
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # 2. Thêm nguồn upstream
+          git remote add upstream https://github.com/AstideLabs/android_kernel_xiaomi_sm8250.git
+          
+          # 3. Lấy code mới nhất từ trạng thái merge của PR #74
+          git fetch upstream refs/pull/74/merge
+          
+          # 4. Ghi đè nhánh hiện tại bằng code mới nhất của PR
+          git reset --hard FETCH_HEAD
+          
+          # 5. Đẩy code lên nhánh của bạn
+          # Phải dùng --force vì mã băm (hash) của PR sẽ thay đổi mỗi lần tác giả PR cập nhật code
+          git push --force origin AstideLabs_Susfs_2.3.0
+          
