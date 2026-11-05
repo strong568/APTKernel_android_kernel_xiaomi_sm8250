@@ -19,6 +19,7 @@ jobs:
         with:
           # XÓA bỏ dòng ref ở đây để GitHub tải nhánh mặc định (main) trước, tránh báo lỗi
           fetch-depth: 0 # Bắt buộc phải tải toàn bộ lịch sử (0) để tạo hoặc chuyển nhánh
+          token: ${{ secrets.GH_PAT }} # Sử dụng Personal Access Token để có quyền sửa file workflow
 
       - name: Check Branch and Sync PR #74
         run: |
