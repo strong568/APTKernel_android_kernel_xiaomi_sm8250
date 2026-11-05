@@ -1,0 +1,64 @@
+name: Sync Entire Branch from Upstream
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_url:
+        description: 'Link repository upstream để sync'
+        required: true
+        default: 'https://github.com/KirinNova/android_kernel_xiaomi_sm8250.git'
+        type: string
+      upstream_branch:
+        description: 'Tên nhánh upstream muốn sync'
+        required: true
+        default: 'HyperSU'
+        type: string
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  sync-branch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 1. Checkout repository của bạn
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 2. Cấu hình Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: 3. Lấy dữ liệu từ Upstream
+        run: |
+          # Lấy URL và Tên nhánh từ input (nếu chạy bằng tay) 
+          UPSTREAM_URL="${{ inputs.upstream_url }}"
+          UPSTREAM_BRANCH="${{ inputs.upstream_branch }}"
+          
+          # Nếu biến trống (chạy tự động qua schedule), gán về giá trị mặc định
+          UPSTREAM_URL="${UPSTREAM_URL:-https://github.com/KirinNova/android_kernel_xiaomi_sm8250.git}"
+          UPSTREAM_BRANCH="${UPSTREAM_BRANCH:-HyperSU}"
+          
+          echo "Đang lấy dữ liệu từ nhánh $UPSTREAM_BRANCH của: $UPSTREAM_URL"
+          
+          # Lưu biến nhánh vào GITHUB_ENV để các bước sau (Step 4, 5) có thể dùng chung
+          echo "BRANCH_NAME=$UPSTREAM_BRANCH" >> $GITHUB_ENV
+          
+          # Thêm remote upstream và tải nhánh về
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream "$UPSTREAM_BRANCH"
+
+      - name: 4. Đồng bộ toàn bộ nhánh
+        run: |
+          # -B sẽ tự động tạo nhánh $BRANCH_NAME nếu chưa có, hoặc ghi đè nếu đã tồn tại
+          git checkout -B "$BRANCH_NAME" upstream/"$BRANCH_NAME"
+
+      - name: 5. Push code lên repository của bạn
+        run: |
+          # Ép push (-f) nhánh vừa tạo/đồng bộ lên repository của bạn
+          git push -f origin "$BRANCH_NAME"
+          
