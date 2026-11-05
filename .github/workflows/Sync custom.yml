@@ -32,6 +32,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Bắt buộc thêm dòng này để cấp quyền ghi vào thư mục .github/workflows
+          token: ${{ secrets.GH_PAT }}
 
       - name: 2. Cấu hình Git
         run: |
