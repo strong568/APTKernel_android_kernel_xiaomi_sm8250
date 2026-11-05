@@ -1,0 +1,38 @@
+name: Sync KirinNova HyperSU
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          # Đảm bảo bạn đã tạo nhánh tên 'HyperSU' trên repo GitHub CỦA BẠN trước khi chạy
+          ref: HyperSU 
+          fetch-depth: 0
+
+      - name: Fetch and Sync KirinNova
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # 1. Thêm nguồn upstream là repo của KirinNova
+          git remote add upstream https://github.com/KirinNova/android_kernel_xiaomi_sm8250.git
+          
+          # 2. Lấy code mới nhất từ nhánh HyperSU thay vì lấy từ Pull Request
+          git fetch upstream HyperSU
+          
+          # 3. Ghi đè toàn bộ code nhánh hiện tại bằng nhánh HyperSU vừa tải về
+          git reset --hard FETCH_HEAD
+          
+          # 4. Đẩy (ép ghi đè) lên nhánh HyperSU trên repository của bạn
+          git push --force origin HyperSU
+          
