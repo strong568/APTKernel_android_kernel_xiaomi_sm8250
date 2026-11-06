@@ -1,0 +1,51 @@
+name: Sync extreme AstideLabs susfs 2.3.0 PR #74
+
+on:
+  schedule:
+    # Chạy tự động vào 00:00 UTC (7h sáng giờ VN) mỗi ngày
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    # Bật nút Run workflow để bạn có thể chạy thủ công bất cứ lúc nào
+
+permissions:
+  contents: write # Cấp quyền ghi để Actions Bot có thể push code
+
+jobs:
+  sync-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          # XÓA bỏ dòng ref ở đây để GitHub tải nhánh mặc định (main) trước, tránh báo lỗi
+          fetch-depth: 0 # Bắt buộc phải tải toàn bộ lịch sử (0) để tạo hoặc chuyển nhánh
+          token: ${{ secrets.GH_PAT }} # Sử dụng Personal Access Token để có quyền sửa file workflow
+
+      - name: Check Branch and Sync PR #74
+        run: |
+          # 1. Cấu hình danh tính cho Bot
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # 2. Kiểm tra xem nhánh đã tồn tại trên repo GitHub chưa
+          if git ls-remote --exit-code --heads origin AstideLabs_Susfs_2.3.0 >/dev/null 2>&1; then
+            echo "Nhánh Extreme AstideLabs_Susfs_2.3.0 đã tồn tại. Đang chuyển đổi..."
+            git checkout Extreme_AstideLabs_Susfs_2.3.0
+          else
+            echo "Nhánh chưa tồn tại. Đang tạo mới nhánh Extreme_AstideLabs_Susfs_2.3.0..."
+            git checkout -b Extreme_AstideLabs_Susfs_2.3.0
+          fi
+          
+          # 3. Thêm nguồn upstream
+          git remote add upstream https://github.com/AstideLabs/android_kernel_xiaomi_sm8250.git
+          
+          # 4. Lấy code mới nhất từ trạng thái merge của PR #74
+          git fetch upstream refs/pull/74/merge
+          
+          # 5. Ghi đè nhánh hiện tại bằng code mới nhất của PR
+          git reset --hard FETCH_HEAD
+          
+          # 6. Đẩy code lên nhánh của bạn
+          # Thêm cờ -u (set-upstream) để khởi tạo liên kết nhánh với remote trong lần tạo đầu tiên
+          git push -u --force origin Extreme_AstideLabs_Susfs_2.3.0
+          
