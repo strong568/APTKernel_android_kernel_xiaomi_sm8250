@@ -1,0 +1,81 @@
+name: Sync Custom Upstream Branch Daily
+
+on:
+  schedule:
+    # Chạy tự động hàng ngày vào lúc 00:00 UTC (7h sáng giờ VN)
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_url:
+        description: 'Đường dẫn URL repo gốc (Upstream)'
+        required: true
+        default: 'https://github.com/RanggaWbp/android_kernel_xiaomi_sm8250'
+        type: string
+      upstream_branch:
+        description: 'Nhánh nguồn cần đồng bộ'
+        required: true
+        default: 'android17-aptusitu'
+        type: string
+      target_branch:
+        description: 'Nhánh đích trên repo của bạn'
+        required: true
+        default: 'android17-aptusitu-2026'
+        type: string
+
+permissions:
+  contents: write # Cấp quyền ghi để đẩy code lên repo
+
+jobs:
+  sync-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }} # Sử dụng Personal Access Token có quyền push code
+
+      - name: Configure Git Identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync Upstream Branch
+        run: |
+          # Gán giá trị từ input hoặc dùng giá trị mặc định nếu chạy tự động theo lịch (schedule)
+          U_URL="${{ github.event.inputs.upstream_url }}"
+          [ -z "$U_URL" ] && U_URL="https://github.com/RanggaWbp/android_kernel_xiaomi_sm8250"
+
+          U_BRANCH="${{ github.event.inputs.upstream_branch }}"
+          [ -z "$U_BRANCH" ] && U_BRANCH="android17-aptusitu"
+
+          T_BRANCH="${{ github.event.inputs.target_branch }}"
+          [ -z "$T_BRANCH" ] && T_BRANCH="android17-aptusitu-2026"
+
+          echo "==========================================="
+          echo " Upstream URL   : $U_URL"
+          echo " Upstream Branch: $U_BRANCH"
+          echo " Target Branch  : $T_BRANCH"
+          echo "==========================================="
+
+          # 1. Thêm remote upstream và fetch dữ liệu
+          git remote add upstream "$U_URL"
+          git fetch upstream
+
+          # 2. Kiểm tra và chuyển đổi/tạo mới nhánh đích
+          if git ls-remote --exit-code --heads origin "$T_BRANCH" >/dev/null 2>&1; then
+            echo "Nhánh đích $T_BRANCH đã tồn tại trên remote. Đang checkout..."
+            git checkout "$T_BRANCH"
+            git pull origin "$T_BRANCH"
+          else
+            echo "Nhánh đích $T_BRANCH chưa tồn tại. Đang tạo mới từ upstream/$U_BRANCH..."
+            git checkout -b "$T_BRANCH" upstream/"$U_BRANCH"
+          fi
+
+          # 3. Tiến hành merge code từ nhánh nguồn upstream
+          echo "Đang merge code từ upstream/$U_BRANCH vào $T_BRANCH..."
+          git merge upstream/"$U_BRANCH" --no-edit
+
+          # 4. Đẩy code đã đồng bộ lên repo của bạn
+          git push -u origin "$T_BRANCH"
+          echo "Đồng bộ thành công!"
