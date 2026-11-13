@@ -1,0 +1,71 @@
+name: Sync to Custom Target Branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_url:
+        description: 'Link repository upstream để sync'
+        required: true
+        default: 'https://github.com/RanggaWbp/android_kernel_xiaomi_sm8250.git'
+        type: string
+      upstream_branch:
+        description: 'Tên nhánh upstream MẶC ĐỊNH lấy về'
+        required: true
+        default: 'android17-aptusitu'
+        type: string
+      target_branch:
+        description: 'Tên nhánh MỚI trên Github của bạn để lưu code'
+        required: true
+        default: 'android17-aptusitu-2026'
+        type: string
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  sync-branch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 1. Checkout repository của bạn
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Bắt buộc thêm dòng này để cấp quyền ghi vào thư mục .github/workflows
+          token: ${{ secrets.GH_PAT }}
+
+      - name: 2. Cấu hình Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: 3. Đọc biến và tải dữ liệu từ Upstream
+        run: |
+          # Nhận diện các biến từ giao diện (nếu chạy tay)
+          UPSTREAM_URL="${{ inputs.upstream_url }}"
+          UPSTREAM_BRANCH="${{ inputs.upstream_branch }}"
+          TARGET_BRANCH="${{ inputs.target_branch }}"
+          
+          # Gán giá trị mặc định (cho trường hợp tự động chạy qua lịch)
+          UPSTREAM_URL="${UPSTREAM_URL:-https://github.com/RanggaWbp/android_kernel_xiaomi_sm8250.git}"
+          UPSTREAM_BRANCH="${UPSTREAM_BRANCH:-android17-aptusitu}"
+          TARGET_BRANCH="${TARGET_BRANCH:-android17-aptusitu-2026}"
+          
+          # Xuất các biến này ra môi trường để các Step sau sử dụng
+          echo "UPSTREAM_BRANCH=$UPSTREAM_BRANCH" >> $GITHUB_ENV
+          echo "TARGET_BRANCH=$TARGET_BRANCH" >> $GITHUB_ENV
+          
+          echo "Đang lấy dữ liệu từ nhánh: $UPSTREAM_BRANCH tại $UPSTREAM_URL"
+          echo "Sẽ đồng bộ vào nhánh MỚI của bạn là: $TARGET_BRANCH"
+          
+          # Thêm remote upstream và tải nhánh nguồn về
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream "$UPSTREAM_BRANCH"
+      - name: 4. Tạo nhánh mới và đồng bộ code
+        run: |
+          # Lệnh này sẽ tạo nhánh $TARGET_BRANCH (nếu chưa có) và ép code của nó giống hệt upstream/$UPSTREAM_BRANCH
+          git checkout -B "$TARGET_BRANCH" upstream/"$UPSTREAM_BRANCH"
+      - name: 5. Push code lên repository của bạn
+        run: |
+          # Push code mới lên nhánh android17-aptusitu-2026 của bạn
+          git push -f origin "$TARGET_BRANCH"
