@@ -1,0 +1,164 @@
+name: Build release Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: 'Target Device Code'
+        required: true
+        default: 'munch'
+        type: choice
+        options:
+          - alioth
+          - apollo
+          - cas
+          - cmi
+          - dagu
+          - elish
+          - enuma
+          - lmi
+          - munch
+          - pipa
+          - psyche
+          - thyme
+          - umi
+      ksu:
+        description: 'Enable KernelSU (BakaSU)'
+        required: true
+        type: boolean
+        default: false
+      droidspaces:
+        description: 'Enable Droidspaces (LXC/Docker) support'
+        required: true
+        type: boolean
+        default: false
+      target_os:
+        description: 'Target OS'
+        required: true
+        type: choice
+        default: 'both'
+        options:
+          - aosp
+          - miui
+          - both
+
+jobs:
+  build-kernel:
+    name: Build ${{ github.event.inputs.device }} | KSU:${{ github.event.inputs.ksu }} | Droidspaces:${{ github.event.inputs.droidspaces }} | OS:${{ github.event.inputs.target_os }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # Cần thiết để GitHub Actions có quyền tạo Release và upload file
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 1
+
+    - name: Set up Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex gawk \
+          git gnupg gperf imagemagick libncurses-dev \
+          lib32readline-dev lib32z1-dev lz4 \
+          libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync \
+          schedtool squashfs-tools xsltproc zip zlib1g-dev python3
+          
+    - name: Cache ccache
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/ccache_mikernel
+        key: ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-${{ github.run_id }}
+        restore-keys: |
+          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-
+          ${{ runner.os }}-kernel-ccache-
+
+    - name: Setup zyc-clang 16 Toolchain
+      run: |
+        mkdir -p $HOME/zyc-clang
+        cd $HOME/zyc-clang
+        wget -q https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz
+        tar -zxvf Clang-16.0.6-20260807.tar.gz
+
+    - name: Run Build Script
+      run: |
+        chmod +x build_kernel.sh
+        
+        ARGS="${{ github.event.inputs.device }}"
+        
+        if [ "${{ github.event.inputs.ksu }}" == "true" ]; then
+          ARGS="$ARGS ksu"
+        fi
+
+        if [ "${{ github.event.inputs.droidspaces }}" == "true" ]; then
+          ARGS="$ARGS droidspaces"
+        fi
+        
+        if [ "${{ github.event.inputs.target_os }}" != "both" ]; then
+          ARGS="$ARGS ${{ github.event.inputs.target_os }}"
+        fi
+        
+        echo "Executing command: ./build_kernel.sh $ARGS"
+        ./build_kernel.sh $ARGS
+
+    - name: Read BakaSU Version
+      id: bakasu
+      run: |
+        if [ -f .bakasu_version ]; then
+          BAKASU_VERSION=$(cat .bakasu_version)
+          BAKASU_VERSION_CODE=$(cat .bakasu_version_code 2>/dev/null || echo "unknown")
+          echo "BAKASU_VERSION=$BAKASU_VERSION" >> $GITHUB_OUTPUT
+          echo "BAKASU_VERSION_CODE=$BAKASU_VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "BakaSU version: $BAKASU_VERSION (code $BAKASU_VERSION_CODE)"
+        else
+          echo "BAKASU_VERSION=not enabled" >> $GITHUB_OUTPUT
+          echo "BAKASU_VERSION_CODE=not enabled" >> $GITHUB_OUTPUT
+          echo "BakaSU not enabled (no version file)"
+        fi
+
+    - name: Rename ZIP with BakaSU Version & Droidspaces
+      run: |
+        for f in TanpaNama_*.zip; do
+          [ -e "$f" ] || continue
+          NEW_NAME="$f"
+          
+          # Nếu bật KSU và tồn tại file version, chèn phiên bản BakaSU vào tên file
+          if [ "${{ github.event.inputs.ksu }}" == "true" ] && [ -f .bakasu_version ]; then
+            BAKASU_VER=$(cat .bakasu_version)
+            NEW_NAME=$(echo "$NEW_NAME" | sed "s/BakaSU-SuSFS-NoMount/BakaSU-${BAKASU_VER}-SuSFS-NoMount/g")
+          fi
+          
+          # Nếu bật Droidspaces, chèn nhãn Droidspaces vào tên file
+          if [ "${{ github.event.inputs.droidspaces }}" == "true" ]; then
+            NEW_NAME=$(echo "$NEW_NAME" | sed "s/_anykernel3/-Droidspaces_anykernel3/g")
+          fi
+          
+          if [ "$f" != "$NEW_NAME" ]; then
+            echo "Renaming: $f -> $NEW_NAME"
+            mv "$f" "$NEW_NAME"
+          fi
+        done
+
+    - name: Upload Flashable ZIP (Artifact)
+      uses: actions/upload-artifact@v7
+      with:
+        name: TanpaNama-${{ github.event.inputs.device }}-${{ github.event.inputs.target_os }}-KSU-${{ steps.bakasu.outputs.BAKASU_VERSION_CODE }}-Droidspaces-${{ github.event.inputs.droidspaces }}-${{ github.run_id }}
+        path: TanpaNama_*.zip
+        compression-level: 0
+
+    - name: Create GitHub Release and Upload Asset
+      uses: softprops/action-gh-release@v2
+      with:
+        files: TanpaNama_*.zip
+        tag_name: kernel-${{ github.event.inputs.device }}-${{ github.run_id }}
+        name: "Kernel ${{ github.event.inputs.device }} | OS: ${{ github.event.inputs.target_os }} | KSU: ${{ github.event.inputs.ksu }} | Droidspaces: ${{ github.event.inputs.droidspaces }}"
+        body: |
+          ### 🛠️ Thông tin bản Build Kernel
+          - **Thiết bị (Device):** `${{ github.event.inputs.device }}`
+          - **Target OS:** `${{ github.event.inputs.target_os }}`
+          - **KernelSU (BakaSU):** `${{ github.event.inputs.ksu }}` (Phiên bản: `${{ steps.bakasu.outputs.BAKASU_VERSION }}`)
+          - **Droidspaces (LXC/Docker):** `${{ github.event.inputs.droidspaces }}`
+          - **GitHub Run ID:** `${{ github.run_id }}`
+        draft: false
+        prerelease: false
+        
