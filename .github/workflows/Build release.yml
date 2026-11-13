@@ -26,12 +26,12 @@ on:
         description: 'Enable KernelSU (BakaSU)'
         required: true
         type: boolean
-        default: false
+        default: true
       droidspaces:
         description: 'Enable Droidspaces (LXC/Docker) support'
         required: true
         type: boolean
-        default: false
+        default: true
       target_os:
         description: 'Target OS'
         required: true
@@ -118,14 +118,15 @@ jobs:
 
     - name: Rename ZIP with BakaSU Version & Droidspaces
       run: |
+        CODE_VER="${{ steps.bakasu.outputs.BAKASU_VERSION_CODE }}"
         for f in TanpaNama_*.zip; do
           [ -e "$f" ] || continue
           NEW_NAME="$f"
           
-          # Nếu bật KSU và tồn tại file version, chèn phiên bản BakaSU vào tên file
+          # Nếu bật KSU và tồn tại file version, chèn phiên bản và v<version_code> vào tên file
           if [ "${{ github.event.inputs.ksu }}" == "true" ] && [ -f .bakasu_version ]; then
             BAKASU_VER=$(cat .bakasu_version)
-            NEW_NAME=$(echo "$NEW_NAME" | sed "s/BakaSU-SuSFS-NoMount/BakaSU-${BAKASU_VER}-SuSFS-NoMount/g")
+            NEW_NAME=$(echo "$NEW_NAME" | sed "s/BakaSU-SuSFS-NoMount/BakaSU-${BAKASU_VER}-v${CODE_VER}-SuSFS-NoMount/g")
           fi
           
           # Nếu bật Droidspaces, chèn nhãn Droidspaces vào tên file
@@ -142,7 +143,7 @@ jobs:
     - name: Upload Flashable ZIP (Artifact)
       uses: actions/upload-artifact@v7
       with:
-        name: TanpaNama-${{ github.event.inputs.device }}-${{ github.event.inputs.target_os }}-KSU-${{ steps.bakasu.outputs.BAKASU_VERSION_CODE }}-Droidspaces-${{ github.event.inputs.droidspaces }}-${{ github.run_id }}
+        name: TanpaNama-${{ github.event.inputs.device }}-${{ github.event.inputs.target_os }}-KSU-v${{ steps.bakasu.outputs.BAKASU_VERSION_CODE }}-Droidspaces-${{ github.event.inputs.droidspaces }}-${{ github.run_id }}
         path: TanpaNama_*.zip
         compression-level: 0
 
@@ -150,15 +151,14 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: TanpaNama_*.zip
-        tag_name: kernel-${{ github.event.inputs.device }}-${{ github.run_id }}
-        name: "Kernel ${{ github.event.inputs.device }} | OS: ${{ github.event.inputs.target_os }} | KSU: ${{ github.event.inputs.ksu }} | Droidspaces: ${{ github.event.inputs.droidspaces }}"
+        tag_name: kernel-${{ github.event.inputs.device }}-v${{ steps.bakasu.outputs.BAKASU_VERSION_CODE }}-${{ github.run_id }}
+        name: "Kernel ${{ github.event.inputs.device }} | OS: ${{ github.event.inputs.target_os }} | KSU: ${{ github.event.inputs.ksu }} (v${{ steps.bakasu.outputs.BAKASU_VERSION_CODE }}) | Droidspaces: ${{ github.event.inputs.droidspaces }}"
         body: |
           ### 🛠️ Thông tin bản Build Kernel
           - **Thiết bị (Device):** `${{ github.event.inputs.device }}`
           - **Target OS:** `${{ github.event.inputs.target_os }}`
-          - **KernelSU (BakaSU):** `${{ github.event.inputs.ksu }}` (Phiên bản: `${{ steps.bakasu.outputs.BAKASU_VERSION }}`)
+          - **KernelSU (BakaSU):** `${{ github.event.inputs.ksu }}` (Phiên bản: `${{ steps.bakasu.outputs.BAKASU_VERSION }}` - v${{ steps.bakasu.outputs.BAKASU_VERSION_CODE }})
           - **Droidspaces (LXC/Docker):** `${{ github.event.inputs.droidspaces }}`
           - **GitHub Run ID:** `${{ github.run_id }}`
         draft: false
         prerelease: false
-        
